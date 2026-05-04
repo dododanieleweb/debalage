@@ -458,16 +458,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return true;
     }
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { name, city, role } },
     });
-    return !error;
+    if (error) return false;
+
+    // With mailer_autoconfirm enabled the session is immediately available.
+    // Pre-populate the user in state so the dashboard is usable right away,
+    // without waiting for onAuthStateChange to load the profile row.
+    if (data.user) {
+      const tempUser: User = {
+        id:          data.user.id,
+        name,
+        email,
+        role,
+        city,
+        avatar:      `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=8B6A3E&color=FAF7F2&size=200`,
+        bio:         '',
+        rating:      0,
+        reviewCount: 0,
+        joinedAt:    new Date().toISOString().slice(0, 10),
+        specialties: [],
+        verified:    false,
+        salesCount:  0,
+      };
+      dispatch({ type: 'LOGIN', payload: tempUser });
+    }
+    return true;
   };
 
   const openAuth  = (mode: 'login' | 'register') => dispatch({ type: 'OPEN_AUTH', mode });
   const closeAuth = () => dispatch({ type: 'CLOSE_AUTH' });
+
+  // ── helper: show error toast + rollback ──────────────────────────────────
+  const notifyErr = (msg: string) => {
+    dispatch({ type: 'NOTIFY', message: msg, notifType: 'error' });
+    setTimeout(() => dispatch({ type: 'CLEAR_NOTIFY' }), 4000);
+  };
 
   // ── Products ──────────────────────────────────────────────────────────────
   const addProduct = (product: Product) => {
@@ -492,7 +521,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       original_price: product.originalPrice ?? null,
       status:         product.status,
       featured:       product.featured,
-    }).then(({ error }) => { if (error) console.error('addProduct:', error); });
+    }).then(({ error }) => {
+      if (error) {
+        console.error('addProduct:', error);
+        dispatch({ type: 'DELETE_PRODUCT', productId: product.id });
+        notifyErr(`Errore nel salvataggio del prodotto: ${error.message}`);
+      }
+    });
   };
 
   const updateProduct = (product: Product) => {
@@ -515,14 +550,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       status:         product.status,
       featured:       product.featured,
       event_id:       product.eventId ?? null,
-    }).eq('id', product.id).then(({ error }) => { if (error) console.error('updateProduct:', error); });
+    }).eq('id', product.id).then(({ error }) => {
+      if (error) {
+        console.error('updateProduct:', error);
+        notifyErr(`Errore nell'aggiornamento del prodotto: ${error.message}`);
+      }
+    });
   };
 
   const deleteProduct = (productId: string) => {
     dispatch({ type: 'DELETE_PRODUCT', productId });
     if (!HAS_SUPABASE) return;
     supabase.from('products').delete().eq('id', productId)
-      .then(({ error }) => { if (error) console.error('deleteProduct:', error); });
+      .then(({ error }) => {
+        if (error) {
+          console.error('deleteProduct:', error);
+          notifyErr(`Errore nell'eliminazione del prodotto: ${error.message}`);
+        }
+      });
   };
 
   // ── Events ────────────────────────────────────────────────────────────────
@@ -548,7 +593,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       current_attendees: event.currentAttendees,
       featured:          event.featured,
       slot_max_capacity: event.slotMaxCapacity ?? null,
-    }).then(({ error }) => { if (error) console.error('addEvent:', error); });
+    }).then(({ error }) => {
+      if (error) {
+        console.error('addEvent:', error);
+        dispatch({ type: 'DELETE_EVENT', eventId: event.id });
+        notifyErr(`Errore nel salvataggio dell'evento: ${error.message}`);
+      }
+    });
   };
 
   const updateEvent = (event: Event) => {
@@ -571,14 +622,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       current_attendees: event.currentAttendees,
       featured:          event.featured,
       slot_max_capacity: event.slotMaxCapacity ?? null,
-    }).eq('id', event.id).then(({ error }) => { if (error) console.error('updateEvent:', error); });
+    }).eq('id', event.id).then(({ error }) => {
+      if (error) {
+        console.error('updateEvent:', error);
+        notifyErr(`Errore nell'aggiornamento dell'evento: ${error.message}`);
+      }
+    });
   };
 
   const deleteEvent = (eventId: string) => {
     dispatch({ type: 'DELETE_EVENT', eventId });
     if (!HAS_SUPABASE) return;
     supabase.from('events').delete().eq('id', eventId)
-      .then(({ error }) => { if (error) console.error('deleteEvent:', error); });
+      .then(({ error }) => {
+        if (error) {
+          console.error('deleteEvent:', error);
+          notifyErr(`Errore nell'eliminazione dell'evento: ${error.message}`);
+        }
+      });
   };
 
   // ── Cart ──────────────────────────────────────────────────────────────────
