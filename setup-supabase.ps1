@@ -119,14 +119,21 @@ VITE_SUPABASE_ANON_KEY=$ANON_KEY
 Set-Content -Path ".env" -Value $envContent -Encoding UTF8
 Write-Host "  .env creato!" -ForegroundColor Green
 
-# ── 7. Imposta env vars su Netlify ────────────────────────────
+# ── 7. Imposta env vars su Netlify + GitHub ───────────────────
 Write-Host ""
-Write-Host "PASSO 7 — Imposto le variabili su Netlify..." -ForegroundColor Yellow
+Write-Host "PASSO 7 — Imposto le variabili su Netlify e GitHub..." -ForegroundColor Yellow
 
-npx netlify env:set VITE_SUPABASE_URL $PROJECT_URL | Out-Null
-npx netlify env:set VITE_SUPABASE_ANON_KEY $ANON_KEY | Out-Null
+npx netlify env:set VITE_SUPABASE_URL      $PROJECT_URL | Out-Null
+npx netlify env:set VITE_SUPABASE_ANON_KEY $ANON_KEY    | Out-Null
+Write-Host "  Netlify: fatto!" -ForegroundColor Green
 
-Write-Host "  Variabili impostate su Netlify!" -ForegroundColor Green
+# Aggiungi anche come GitHub Actions secrets
+$ghCli = "C:\Program Files\GitHub CLI\gh.exe"
+if (Test-Path $ghCli) {
+    $PROJECT_URL  | & $ghCli secret set VITE_SUPABASE_URL      --repo dododanieleweb/debalage 2>&1 | Out-Null
+    $ANON_KEY     | & $ghCli secret set VITE_SUPABASE_ANON_KEY --repo dododanieleweb/debalage 2>&1 | Out-Null
+    Write-Host "  GitHub Secrets: fatto!" -ForegroundColor Green
+}
 
 # ── 8. Rideploy con Supabase ──────────────────────────────────
 Write-Host ""
