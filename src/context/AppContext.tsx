@@ -1,0 +1,695 @@
+import {
+  createContext, useContext, useReducer, useEffect,
+  ReactNode, useRef,
+} from 'react';
+import { User, Product, CartItem, TimeSlot, Order, Event } from '../types';
+import { USERS, PRODUCTS, EVENTS, INITIAL_SLOTS, generateSlots } from '../data/mockData';
+import { supabase } from '../lib/supabase';
+
+// ── helpers ─────────────────────────────────────────────────────────────────
+const HAS_SUPABASE =
+  Boolean(import.meta.env.VITE_SUPABASE_URL) &&
+  Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY);
+
+// snake_case DB rows → camelCase TS types
+function rowToUser(r: Record<string, unknown>): User {
+  return {
+    id:          r.id as string,
+    name:        (r.name as string) ?? '',
+    email:       (r.email as string) ?? '',
+    role:        (r.role as User['role']) ?? 'buyer',
+    avatar:      (r.avatar as string) ?? '',
+    bio:         (r.bio as string) ?? '',
+    city:        (r.city as string) ?? '',
+    rating:      Number(r.rating ?? 0),
+    reviewCount: Number(r.review_count ?? 0),
+    joinedAt:    (r.joined_at as string)?.slice(0, 10) ?? '',
+    specialties: (r.specialties as string[]) ?? [],
+    verified:    Boolean(r.verified),
+    salesCount:  Number(r.sales_count ?? 0),
+  };
+}
+
+function rowToEvent(r: Record<string, unknown>): Event {
+  return {
+    id:               r.id as string,
+    title:            (r.title as string) ?? '',
+    description:      (r.description as string) ?? '',
+    type:             (r.type as Event['type']) ?? 'mercatino',
+    sellerId:         (r.seller_id as string) ?? '',
+    address:          (r.address as string) ?? '',
+    city:             (r.city as string) ?? '',
+    date:             (r.date as string) ?? '',
+    endDate:          (r.end_date as string | undefined) ?? undefined,
+    timeStart:        (r.time_start as string) ?? '',
+    timeEnd:          (r.time_end as string) ?? '',
+    image:            (r.image as string) ?? '',
+    tags:             [],
+    status:           (r.status as Event['status']) ?? 'upcoming',
+    productsCount:    Number(r.products_count ?? 0),
+    maxAttendees:     r.max_attendees != null ? Number(r.max_attendees) : undefined,
+    currentAttendees: Number(r.current_attendees ?? 0),
+    price:            0,
+    featured:         Boolean(r.featured),
+    slotMaxCapacity:  r.slot_max_capacity != null ? Number(r.slot_max_capacity) : undefined,
+  };
+}
+
+function rowToProduct(r: Record<string, unknown>): Product {
+  return {
+    id:            r.id as string,
+    title:         (r.title as string) ?? '',
+    description:   (r.description as string) ?? '',
+    price:         Number(r.price ?? 0),
+    originalPrice: r.original_price != null ? Number(r.original_price) : undefined,
+    category:      (r.category as string) ?? '',
+    subcategory:   (r.subcategory as string | undefined) ?? undefined,
+    condition:     (r.condition as Product['condition']) ?? 'buono',
+    images:        (r.images as string[]) ?? [],
+    sellerId:      (r.seller_id as string) ?? '',
+    eventId:       (r.event_id as string | undefined) ?? undefined,
+    tags:          (r.tags as string[]) ?? [],
+    era:           (r.era as string | undefined) ?? undefined,
+    brand:         (r.brand as string | undefined) ?? undefined,
+    dimensions:    (r.dimensions as string | undefined) ?? undefined,
+    material:      (r.material as string | undefined) ?? undefined,
+    status:        (r.status as Product['status']) ?? 'available',
+    featured:      Boolean(r.featured),
+    views:         Number(r.views ?? 0),
+    saves:         0,
+    createdAt:     (r.created_at as string)?.slice(0, 10) ?? '',
+  };
+}
+
+function rowToSlot(r: Record<string, unknown>): TimeSlot {
+  return {
+    id:          r.id as string,
+    eventId:     (r.event_id as string) ?? '',
+    startTime:   (r.start_time as string) ?? '',
+    endTime:     (r.end_time as string) ?? '',
+    maxCapacity: Number(r.max_capacity ?? 4),
+    bookings:    [],
+  };
+}
+
+// ── State ────────────────────────────────────────────────────────────────────
+interface State {
+  user:         User | null;
+  users:        User[];
+  products:     Product[];
+  events:       Event[];
+  orders:       Order[];
+  cart:         CartItem[];
+  wishlist:     string[];
+  isAuthOpen:   boolean;
+  authMode:     'login' | 'register';
+  notification: { message: string; type: 'success' | 'error' | 'info' } | null;
+  slots:        Record<string, TimeSlot[]>;
+  loading:      boolean;
+}
+
+type Action =
+  | { type: 'LOGIN';  payload: User }
+  | { type: 'LOGOUT' }
+  | { type: 'REGISTER'; payload: User }
+  | { type: 'OPEN_AUTH';  mode: 'login' | 'register' }
+  | { type: 'CLOSE_AUTH' }
+  | { type: 'SET_LOADING'; value: boolean }
+  | { type: 'INIT_DATA'; users: User[]; products: Product[]; events: Event[]; slots: Record<string, TimeSlot[]> }
+  | { type: 'SET_WISHLIST'; ids: string[] }
+  | { type: 'SET_ORDERS'; orders: Order[] }
+  // Products
+  | { type: 'ADD_PRODUCT';    product:   Product }
+  | { type: 'UPDATE_PRODUCT'; product:   Product }
+  | { type: 'DELETE_PRODUCT'; productId: string  }
+  // Events
+  | { type: 'ADD_EVENT';    event:   Event  }
+  | { type: 'UPDATE_EVENT'; event:   Event  }
+  | { type: 'DELETE_EVENT'; eventId: string }
+  // Cart
+  | { type: 'ADD_TO_CART';     product: Product }
+  | { type: 'REMOVE_FROM_CART'; productId: string }
+  | { type: 'UPDATE_QUANTITY';  productId: string; quantity: number }
+  | { type: 'CLEAR_CART' }
+  // Orders
+  | { type: 'PLACE_ORDER'; order: Order }
+  | { type: 'UPDATE_ORDER_STATUS'; orderId: string; status: Order['status'] }
+  // Wishlist
+  | { type: 'TOGGLE_WISHLIST'; productId: string }
+  // Notify
+  | { type: 'NOTIFY';       message: string; notifType: 'success' | 'error' | 'info' }
+  | { type: 'CLEAR_NOTIFY' }
+  // Slots
+  | { type: 'BOOK_SLOT';           eventId: string; slotId: string }
+  | { type: 'CANCEL_BOOKING';      eventId: string; slotId: string }
+  | { type: 'SET_SLOT_CAPACITY';   eventId: string; slotId: string; capacity: number }
+  | { type: 'TOGGLE_SLOT_DISABLED';eventId: string; slotId: string }
+  | { type: 'INIT_EVENT_SLOTS';    eventId: string; timeStart: string; timeEnd: string; capacity: number };
+
+const initialState: State = {
+  user:         null,
+  users:        HAS_SUPABASE ? [] : USERS,
+  products:     HAS_SUPABASE ? [] : PRODUCTS,
+  events:       HAS_SUPABASE ? [] : EVENTS,
+  orders:       [],
+  cart:         [],
+  wishlist:     [],
+  isAuthOpen:   false,
+  authMode:     'login',
+  notification: null,
+  slots:        HAS_SUPABASE ? {} : INITIAL_SLOTS,
+  loading:      HAS_SUPABASE,
+};
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'LOGIN':
+      return { ...state, user: action.payload, isAuthOpen: false };
+    case 'LOGOUT':
+      return { ...state, user: null, wishlist: [], orders: [] };
+    case 'REGISTER': {
+      const exists = state.users.find(u => u.email === action.payload.email);
+      if (exists) return state;
+      return { ...state, users: [...state.users, action.payload], user: action.payload, isAuthOpen: false };
+    }
+    case 'OPEN_AUTH':   return { ...state, isAuthOpen: true, authMode: action.mode };
+    case 'CLOSE_AUTH':  return { ...state, isAuthOpen: false };
+    case 'SET_LOADING': return { ...state, loading: action.value };
+    case 'INIT_DATA':
+      return { ...state, users: action.users, products: action.products, events: action.events, slots: action.slots, loading: false };
+    case 'SET_WISHLIST': return { ...state, wishlist: action.ids };
+    case 'SET_ORDERS':   return { ...state, orders: action.orders };
+
+    // ── Products ──
+    case 'ADD_PRODUCT':
+      return { ...state, products: [action.product, ...state.products] };
+    case 'UPDATE_PRODUCT':
+      return { ...state, products: state.products.map(p => p.id === action.product.id ? action.product : p) };
+    case 'DELETE_PRODUCT':
+      return { ...state, products: state.products.filter(p => p.id !== action.productId) };
+
+    // ── Events ──
+    case 'ADD_EVENT':
+      return { ...state, events: [action.event, ...state.events] };
+    case 'UPDATE_EVENT':
+      return { ...state, events: state.events.map(e => e.id === action.event.id ? action.event : e) };
+    case 'DELETE_EVENT':
+      return { ...state, events: state.events.filter(e => e.id !== action.eventId) };
+
+    // ── Cart ──
+    case 'ADD_TO_CART': {
+      const existing = state.cart.find(i => i.product.id === action.product.id);
+      if (existing) {
+        return { ...state, cart: state.cart.map(i => i.product.id === action.product.id ? { ...i, quantity: i.quantity + 1 } : i) };
+      }
+      return { ...state, cart: [...state.cart, { product: action.product, quantity: 1 }] };
+    }
+    case 'REMOVE_FROM_CART':
+      return { ...state, cart: state.cart.filter(i => i.product.id !== action.productId) };
+    case 'UPDATE_QUANTITY':
+      return { ...state, cart: state.cart.map(i => i.product.id === action.productId ? { ...i, quantity: action.quantity } : i) };
+    case 'CLEAR_CART':
+      return { ...state, cart: [] };
+
+    // ── Orders ──
+    case 'PLACE_ORDER':
+      return { ...state, orders: [action.order, ...state.orders], cart: [] };
+    case 'UPDATE_ORDER_STATUS':
+      return { ...state, orders: state.orders.map(o => o.id === action.orderId ? { ...o, status: action.status } : o) };
+
+    // ── Wishlist ──
+    case 'TOGGLE_WISHLIST':
+      return {
+        ...state,
+        wishlist: state.wishlist.includes(action.productId)
+          ? state.wishlist.filter(id => id !== action.productId)
+          : [...state.wishlist, action.productId],
+      };
+
+    // ── Notify ──
+    case 'NOTIFY':      return { ...state, notification: { message: action.message, type: action.notifType } };
+    case 'CLEAR_NOTIFY': return { ...state, notification: null };
+
+    // ── Slots ──
+    case 'BOOK_SLOT': {
+      if (!state.user) return state;
+      const eventSlots = state.slots[action.eventId] ?? [];
+      const updated = eventSlots.map(slot => {
+        if (slot.id !== action.slotId) return slot;
+        if (slot.bookings.length >= slot.maxCapacity) return slot;
+        if (slot.bookings.some(b => b.userId === state.user!.id)) return slot;
+        return {
+          ...slot,
+          bookings: [...slot.bookings, {
+            id: `bk_${slot.id}_${Date.now()}`,
+            slotId: slot.id,
+            eventId: action.eventId,
+            userId: state.user!.id,
+            userName: state.user!.name,
+            userAvatar: state.user!.avatar,
+            createdAt: new Date().toISOString(),
+          }],
+        };
+      });
+      return { ...state, slots: { ...state.slots, [action.eventId]: updated } };
+    }
+    case 'CANCEL_BOOKING': {
+      if (!state.user) return state;
+      const eventSlots = state.slots[action.eventId] ?? [];
+      const updated = eventSlots.map(slot =>
+        slot.id !== action.slotId ? slot : { ...slot, bookings: slot.bookings.filter(b => b.userId !== state.user!.id) }
+      );
+      return { ...state, slots: { ...state.slots, [action.eventId]: updated } };
+    }
+    case 'SET_SLOT_CAPACITY': {
+      const eventSlots = state.slots[action.eventId] ?? [];
+      const updated = eventSlots.map(s => s.id === action.slotId ? { ...s, maxCapacity: Math.max(1, action.capacity) } : s);
+      return { ...state, slots: { ...state.slots, [action.eventId]: updated } };
+    }
+    case 'TOGGLE_SLOT_DISABLED': {
+      const eventSlots = state.slots[action.eventId] ?? [];
+      const updated = eventSlots.map(s => s.id === action.slotId ? { ...s, disabled: !s.disabled } : s);
+      return { ...state, slots: { ...state.slots, [action.eventId]: updated } };
+    }
+    case 'INIT_EVENT_SLOTS': {
+      const newSlots = generateSlots(action.eventId, action.timeStart, action.timeEnd, action.capacity);
+      return { ...state, slots: { ...state.slots, [action.eventId]: newSlots } };
+    }
+
+    default: return state;
+  }
+}
+
+// ── Context interface ────────────────────────────────────────────────────────
+interface ContextValue {
+  state: State;
+  // Auth
+  login:    (email: string, password: string) => Promise<boolean>;
+  logout:   () => void;
+  register: (name: string, email: string, password: string, city: string, role: User['role']) => Promise<boolean>;
+  openAuth:  (mode: 'login' | 'register') => void;
+  closeAuth: () => void;
+  // Products
+  addProduct:    (product: Product) => void;
+  updateProduct: (product: Product) => void;
+  deleteProduct: (productId: string) => void;
+  // Events
+  addEvent:    (event: Event) => void;
+  updateEvent: (event: Event) => void;
+  deleteEvent: (eventId: string) => void;
+  // Cart
+  addToCart:      (product: Product) => void;
+  removeFromCart: (productId: string) => void;
+  updateQuantity: (productId: string, quantity: number) => void;
+  clearCart:      () => void;
+  // Orders
+  placeOrder: (address: string, city: string) => Promise<Order | null>;
+  // Wishlist
+  toggleWishlist: (productId: string) => void;
+  // Notify
+  notify: (message: string, type?: 'success' | 'error' | 'info') => void;
+  // Slots
+  bookSlot:           (eventId: string, slotId: string) => void;
+  cancelBooking:      (eventId: string, slotId: string) => void;
+  setSlotCapacity:    (eventId: string, slotId: string, capacity: number) => void;
+  toggleSlotDisabled: (eventId: string, slotId: string) => void;
+  initEventSlots:     (eventId: string, timeStart: string, timeEnd: string, capacity: number) => void;
+  getUserBookedSlot:  (eventId: string) => TimeSlot | null;
+  // Computed
+  cartCount: number;
+  cartTotal: number;
+}
+
+const AppContext = createContext<ContextValue | null>(null);
+
+// ── Provider ─────────────────────────────────────────────────────────────────
+export function AppProvider({ children }: { children: ReactNode }) {
+  const [state, dispatch] = useReducer(reducer, initialState);
+  // Keep a ref to state so async callbacks see the latest value
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // ── Supabase bootstrap ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!HAS_SUPABASE) return;
+
+    // 1. Load public data (products, events, profiles)
+    const loadData = async () => {
+      const [eventsRes, productsRes, profilesRes, slotsRes] = await Promise.all([
+        supabase.from('events').select('*').order('date', { ascending: true }),
+        supabase.from('products').select('*').order('created_at', { ascending: false }),
+        supabase.from('profiles').select('*'),
+        supabase.from('time_slots').select('*'),
+      ]);
+
+      const events   = (eventsRes.data   ?? []).map(rowToEvent);
+      const products = (productsRes.data ?? []).map(rowToProduct);
+      const users    = (profilesRes.data ?? []).map(rowToUser);
+
+      // Group slots by eventId
+      const slots: Record<string, TimeSlot[]> = {};
+      for (const row of (slotsRes.data ?? [])) {
+        const slot = rowToSlot(row as Record<string, unknown>);
+        if (!slots[slot.eventId]) slots[slot.eventId] = [];
+        slots[slot.eventId].push(slot);
+      }
+
+      dispatch({ type: 'INIT_DATA', users, products, events, slots });
+    };
+
+    loadData().catch(console.error);
+
+    // 2. Auth state listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        // Load profile for logged-in user
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+
+        if (profile) {
+          const user = rowToUser(profile as Record<string, unknown>);
+          dispatch({ type: 'LOGIN', payload: user });
+
+          // Load user-specific data
+          const [wishRes, ordersRes] = await Promise.all([
+            supabase.from('wishlists').select('product_id').eq('user_id', session.user.id),
+            supabase.from('orders').select('*, order_items(*)').eq('user_id', session.user.id).order('created_at', { ascending: false }),
+          ]);
+
+          dispatch({ type: 'SET_WISHLIST', ids: (wishRes.data ?? []).map((w: Record<string, unknown>) => w.product_id as string) });
+
+          const orders: Order[] = (ordersRes.data ?? []).map((o: Record<string, unknown>) => ({
+            id:        o.id as string,
+            userId:    o.user_id as string,
+            status:    o.status as Order['status'],
+            total:     Number(o.total),
+            subtotal:  Number(o.total),
+            shipping:  0,
+            address:   o.address as string,
+            city:      o.city as string,
+            createdAt: (o.created_at as string)?.slice(0, 10) ?? '',
+            items:     ((o.order_items as Record<string, unknown>[]) ?? []).map((item: Record<string, unknown>) => ({
+              product: {
+                id:          item.product_id as string,
+                title:       item.title as string,
+                price:       Number(item.price),
+                images:      [item.image as string],
+                sellerId:    (item.seller_id as string) ?? '',
+                description: '',
+                category:    '',
+                condition:   'buono' as const,
+                tags:        [],
+                status:      'sold' as const,
+                featured:    false,
+                views:       0,
+                saves:       0,
+                createdAt:   '',
+              },
+              quantity: 1,
+            })),
+          }));
+          dispatch({ type: 'SET_ORDERS', orders });
+        }
+      } else if (event === 'SIGNED_OUT') {
+        dispatch({ type: 'LOGOUT' });
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  const login = async (email: string, password: string): Promise<boolean> => {
+    if (!HAS_SUPABASE) {
+      const user = stateRef.current.users.find(u => u.email === email && u.password === password);
+      if (user) { dispatch({ type: 'LOGIN', payload: user }); return true; }
+      return false;
+    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    return !error;
+  };
+
+  const logout = () => {
+    if (HAS_SUPABASE) supabase.auth.signOut().catch(console.error);
+    dispatch({ type: 'LOGOUT' });
+  };
+
+  const register = async (
+    name: string, email: string, password: string, city: string, role: User['role']
+  ): Promise<boolean> => {
+    if (!HAS_SUPABASE) {
+      if (stateRef.current.users.find(u => u.email === email)) return false;
+      const newUser: User = {
+        id:          `u_${Date.now()}`,
+        name, email, password, role, city,
+        avatar:      `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=8B6A3E&color=FAF7F2&size=200`,
+        bio:         '',
+        rating:      0,
+        reviewCount: 0,
+        joinedAt:    new Date().toISOString().slice(0, 10),
+        specialties: [],
+        verified:    false,
+        salesCount:  0,
+      };
+      dispatch({ type: 'REGISTER', payload: newUser });
+      return true;
+    }
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { name, city, role } },
+    });
+    return !error;
+  };
+
+  const openAuth  = (mode: 'login' | 'register') => dispatch({ type: 'OPEN_AUTH', mode });
+  const closeAuth = () => dispatch({ type: 'CLOSE_AUTH' });
+
+  // ── Products ──────────────────────────────────────────────────────────────
+  const addProduct = (product: Product) => {
+    dispatch({ type: 'ADD_PRODUCT', product });
+    if (!HAS_SUPABASE) return;
+    supabase.from('products').insert({
+      id:             product.id,
+      seller_id:      product.sellerId,
+      event_id:       product.eventId ?? null,
+      title:          product.title,
+      description:    product.description,
+      category:       product.category,
+      subcategory:    product.subcategory ?? null,
+      condition:      product.condition,
+      era:            product.era ?? null,
+      brand:          product.brand ?? null,
+      material:       product.material ?? null,
+      dimensions:     product.dimensions ?? null,
+      images:         product.images,
+      tags:           product.tags,
+      price:          product.price,
+      original_price: product.originalPrice ?? null,
+      status:         product.status,
+      featured:       product.featured,
+    }).then(({ error }) => { if (error) console.error('addProduct:', error); });
+  };
+
+  const updateProduct = (product: Product) => {
+    dispatch({ type: 'UPDATE_PRODUCT', product });
+    if (!HAS_SUPABASE) return;
+    supabase.from('products').update({
+      title:          product.title,
+      description:    product.description,
+      category:       product.category,
+      subcategory:    product.subcategory ?? null,
+      condition:      product.condition,
+      era:            product.era ?? null,
+      brand:          product.brand ?? null,
+      material:       product.material ?? null,
+      dimensions:     product.dimensions ?? null,
+      images:         product.images,
+      tags:           product.tags,
+      price:          product.price,
+      original_price: product.originalPrice ?? null,
+      status:         product.status,
+      featured:       product.featured,
+      event_id:       product.eventId ?? null,
+    }).eq('id', product.id).then(({ error }) => { if (error) console.error('updateProduct:', error); });
+  };
+
+  const deleteProduct = (productId: string) => {
+    dispatch({ type: 'DELETE_PRODUCT', productId });
+    if (!HAS_SUPABASE) return;
+    supabase.from('products').delete().eq('id', productId)
+      .then(({ error }) => { if (error) console.error('deleteProduct:', error); });
+  };
+
+  // ── Events ────────────────────────────────────────────────────────────────
+  const addEvent = (event: Event) => {
+    dispatch({ type: 'ADD_EVENT', event });
+    if (!HAS_SUPABASE) return;
+    supabase.from('events').insert({
+      id:                event.id,
+      seller_id:         event.sellerId,
+      title:             event.title,
+      description:       event.description,
+      type:              event.type,
+      status:            event.status,
+      date:              event.date,
+      end_date:          event.endDate ?? null,
+      time_start:        event.timeStart,
+      time_end:          event.timeEnd,
+      city:              event.city,
+      address:           event.address,
+      image:             event.image,
+      products_count:    event.productsCount,
+      max_attendees:     event.maxAttendees ?? null,
+      current_attendees: event.currentAttendees,
+      featured:          event.featured,
+      slot_max_capacity: event.slotMaxCapacity ?? null,
+    }).then(({ error }) => { if (error) console.error('addEvent:', error); });
+  };
+
+  const updateEvent = (event: Event) => {
+    dispatch({ type: 'UPDATE_EVENT', event });
+    if (!HAS_SUPABASE) return;
+    supabase.from('events').update({
+      title:             event.title,
+      description:       event.description,
+      type:              event.type,
+      status:            event.status,
+      date:              event.date,
+      end_date:          event.endDate ?? null,
+      time_start:        event.timeStart,
+      time_end:          event.timeEnd,
+      city:              event.city,
+      address:           event.address,
+      image:             event.image,
+      products_count:    event.productsCount,
+      max_attendees:     event.maxAttendees ?? null,
+      current_attendees: event.currentAttendees,
+      featured:          event.featured,
+      slot_max_capacity: event.slotMaxCapacity ?? null,
+    }).eq('id', event.id).then(({ error }) => { if (error) console.error('updateEvent:', error); });
+  };
+
+  const deleteEvent = (eventId: string) => {
+    dispatch({ type: 'DELETE_EVENT', eventId });
+    if (!HAS_SUPABASE) return;
+    supabase.from('events').delete().eq('id', eventId)
+      .then(({ error }) => { if (error) console.error('deleteEvent:', error); });
+  };
+
+  // ── Cart ──────────────────────────────────────────────────────────────────
+  const addToCart      = (product: Product)            => dispatch({ type: 'ADD_TO_CART', product });
+  const removeFromCart = (productId: string)           => dispatch({ type: 'REMOVE_FROM_CART', productId });
+  const updateQuantity = (productId: string, qty: number) => dispatch({ type: 'UPDATE_QUANTITY', productId, quantity: qty });
+  const clearCart      = ()                            => dispatch({ type: 'CLEAR_CART' });
+
+  // ── Orders ────────────────────────────────────────────────────────────────
+  const cartTotal = state.cart.reduce((s, i) => s + i.product.price * i.quantity, 0);
+  const cartCount = state.cart.reduce((s, i) => s + i.quantity, 0);
+
+  const placeOrder = async (address: string, city: string): Promise<Order | null> => {
+    const s = stateRef.current;
+    if (!s.user || s.cart.length === 0) return null;
+    const shipping = cartTotal > 100 ? 0 : 8.9;
+    const orderId  = `ord_${Date.now()}`;
+    const order: Order = {
+      id:        orderId,
+      userId:    s.user.id,
+      items:     [...s.cart],
+      subtotal:  cartTotal,
+      shipping,
+      total:     cartTotal + shipping,
+      status:    'confermato',
+      address,
+      city,
+      createdAt: new Date().toISOString().slice(0, 10),
+    };
+    dispatch({ type: 'PLACE_ORDER', order });
+
+    if (!HAS_SUPABASE) return order;
+
+    // Persist to Supabase
+    const { error: orderErr } = await supabase.from('orders').insert({
+      id:      orderId,
+      user_id: s.user.id,
+      status:  'confirmed',
+      total:   order.total,
+      address,
+      city,
+    });
+    if (orderErr) { console.error('placeOrder (orders):', orderErr); return order; }
+
+    const itemRows = s.cart.map((item) => ({
+      id:          `oi_${item.product.id}_${Date.now()}`,
+      order_id:    orderId,
+      product_id:  item.product.id,
+      title:       item.product.title,
+      price:       item.product.price,
+      image:       item.product.images[0] ?? '',
+      seller_id:   item.product.sellerId,
+      seller_name: s.users.find(u => u.id === item.product.sellerId)?.name ?? '',
+    }));
+    const { error: itemsErr } = await supabase.from('order_items').insert(itemRows);
+    if (itemsErr) console.error('placeOrder (items):', itemsErr);
+
+    return order;
+  };
+
+  // ── Wishlist ──────────────────────────────────────────────────────────────
+  const toggleWishlist = (productId: string) => {
+    dispatch({ type: 'TOGGLE_WISHLIST', productId });
+    if (!HAS_SUPABASE || !stateRef.current.user) return;
+    const uid = stateRef.current.user.id;
+    const isCurrentlyWishlisted = stateRef.current.wishlist.includes(productId);
+    if (isCurrentlyWishlisted) {
+      supabase.from('wishlists').delete().match({ user_id: uid, product_id: productId })
+        .then(({ error }) => { if (error) console.error('wishlist remove:', error); });
+    } else {
+      supabase.from('wishlists').insert({ user_id: uid, product_id: productId })
+        .then(({ error }) => { if (error) console.error('wishlist add:', error); });
+    }
+  };
+
+  // ── Notify ────────────────────────────────────────────────────────────────
+  const notify = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    dispatch({ type: 'NOTIFY', message, notifType: type });
+    setTimeout(() => dispatch({ type: 'CLEAR_NOTIFY' }), 3500);
+  };
+
+  // ── Slots ─────────────────────────────────────────────────────────────────
+  const bookSlot           = (eid: string, sid: string)              => dispatch({ type: 'BOOK_SLOT',            eventId: eid, slotId: sid });
+  const cancelBooking      = (eid: string, sid: string)              => dispatch({ type: 'CANCEL_BOOKING',       eventId: eid, slotId: sid });
+  const setSlotCapacity    = (eid: string, sid: string, cap: number) => dispatch({ type: 'SET_SLOT_CAPACITY',    eventId: eid, slotId: sid, capacity: cap });
+  const toggleSlotDisabled = (eid: string, sid: string)              => dispatch({ type: 'TOGGLE_SLOT_DISABLED', eventId: eid, slotId: sid });
+  const initEventSlots     = (eid: string, ts: string, te: string, cap: number) =>
+    dispatch({ type: 'INIT_EVENT_SLOTS', eventId: eid, timeStart: ts, timeEnd: te, capacity: cap });
+
+  const getUserBookedSlot = (eventId: string): TimeSlot | null => {
+    if (!state.user) return null;
+    return state.slots[eventId]?.find(s => s.bookings.some(b => b.userId === state.user!.id)) ?? null;
+  };
+
+  return (
+    <AppContext.Provider value={{
+      state, login, logout, register, openAuth, closeAuth,
+      addProduct, updateProduct, deleteProduct,
+      addEvent, updateEvent, deleteEvent,
+      addToCart, removeFromCart, updateQuantity, clearCart,
+      placeOrder, toggleWishlist, notify, cartCount, cartTotal,
+      bookSlot, cancelBooking, setSlotCapacity, toggleSlotDisabled,
+      initEventSlots, getUserBookedSlot,
+    }}>
+      {children}
+    </AppContext.Provider>
+  );
+}
+
+export function useApp() {
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useApp must be used within AppProvider');
+  return ctx;
+}
