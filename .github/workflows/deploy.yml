@@ -10,6 +10,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     name: Build & Deploy
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
 
     steps:
       - name: Checkout
