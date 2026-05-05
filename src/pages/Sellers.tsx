@@ -8,8 +8,11 @@ export default function Sellers() {
   const [search, setSearch] = useState('');
   const [cityFilter, setCityFilter] = useState('all');
 
-  const sellers = state.users.filter(u => u.role === 'seller' || u.role === 'both');
-  const cities = [...new Set(sellers.map(s => s.city))].sort();
+  const sellers = useMemo(
+    () => state.users.filter(u => u.role === 'seller' || u.role === 'both'),
+    [state.users]
+  );
+  const cities = useMemo(() => [...new Set(sellers.map(s => s.city))].sort(), [sellers]);
 
   const filtered = useMemo(() =>
     sellers.filter(s => {
@@ -17,7 +20,7 @@ export default function Sellers() {
       const matchCity = cityFilter === 'all' || s.city === cityFilter;
       return matchSearch && matchCity;
     }),
-    [search, cityFilter]
+    [sellers, search, cityFilter]
   );
 
   return (

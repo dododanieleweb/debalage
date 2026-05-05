@@ -89,12 +89,12 @@ export default function Navbar() {
               {/* Wishlist */}
               <Link
                 to="/wishlist"
-                className="p-2 rounded-full text-bark-600 hover:text-bark-900 hover:bg-cream-100 transition-colors"
+                className="relative p-2 rounded-full text-bark-600 hover:text-bark-900 hover:bg-cream-100 transition-colors"
                 aria-label="Lista desideri"
               >
                 <Heart size={20} />
                 {state.wishlist.length > 0 && (
-                  <span className="absolute -mt-5 ml-3 w-4 h-4 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                  <span className="absolute top-0.5 right-0.5 w-4 h-4 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                     {state.wishlist.length}
                   </span>
                 )}

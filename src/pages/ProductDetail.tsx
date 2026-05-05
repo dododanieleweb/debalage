@@ -136,7 +136,7 @@ export default function ProductDetail() {
                 <Heart size={20} fill={isWishlisted ? 'currentColor' : 'none'} />
               </button>
               <button
-                onClick={() => notify('Link copiato!', 'info')}
+                onClick={() => { navigator.clipboard.writeText(window.location.href).catch(() => {}); notify('Link copiato!', 'info'); }}
                 className="w-14 h-14 rounded-full border-2 border-cream-300 text-bark-400 flex items-center justify-center hover:border-bark-400 hover:text-bark-700 transition-all"
               >
                 <Share2 size={20} />

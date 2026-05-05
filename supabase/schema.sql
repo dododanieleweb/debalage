@@ -135,7 +135,8 @@ create table if not exists public.time_slots (
   start_time   text not null,
   end_time     text not null,
   max_capacity int  not null default 4,
-  booked       int  not null default 0
+  booked       int  not null default 0,
+  disabled     boolean not null default false
 );
 
 alter table public.time_slots enable row level security;
@@ -179,9 +180,11 @@ create policy "bookings: update own"
 create table if not exists public.orders (
   id              text primary key,
   user_id         uuid not null references public.profiles(id) on delete cascade,
-  status          text not null default 'confirmed'
-                    check (status in ('confirmed','shipped','delivered','cancelled')),
+  status          text not null default 'confermato'
+                    check (status in ('confermato','spedito','consegnato','annullato')),
   total           numeric(10,2) not null,
+  subtotal        numeric(10,2) not null default 0,
+  shipping        numeric(10,2) not null default 0,
   address         text not null default '',
   city            text not null default '',
   created_at      timestamptz not null default now()

@@ -88,6 +88,7 @@ function rowToSlot(r: Record<string, unknown>): TimeSlot {
     startTime:   (r.start_time as string) ?? '',
     endTime:     (r.end_time as string) ?? '',
     maxCapacity: Number(r.max_capacity ?? 4),
+    disabled:    Boolean(r.disabled),
     bookings:    [],
   };
 }
@@ -333,23 +334,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!HAS_SUPABASE) return;
 
-    // 1. Load public data (products, events, profiles)
+    // 1. Load public data (products, events, profiles, slots, bookings)
     const loadData = async () => {
-      const [eventsRes, productsRes, profilesRes, slotsRes] = await Promise.all([
+      const [eventsRes, productsRes, profilesRes, slotsRes, bookingsRes] = await Promise.all([
         supabase.from('events').select('*').order('date', { ascending: true }),
         supabase.from('products').select('*').order('created_at', { ascending: false }),
         supabase.from('profiles').select('*'),
         supabase.from('time_slots').select('*'),
+        supabase.from('bookings').select('*, profiles(name, avatar)'),
       ]);
 
       const events   = (eventsRes.data   ?? []).map(rowToEvent);
       const products = (productsRes.data ?? []).map(rowToProduct);
       const users    = (profilesRes.data ?? []).map(rowToUser);
 
-      // Group slots by eventId
+      // Build bookings map: slotId → bookings array
+      type BookingRow = Record<string, unknown> & { profiles?: Record<string, unknown> };
+      const bookingsBySlot: Record<string, TimeSlot['bookings']> = {};
+      for (const b of ((bookingsRes.data ?? []) as BookingRow[])) {
+        if (!bookingsBySlot[b.slot_id as string]) bookingsBySlot[b.slot_id as string] = [];
+        bookingsBySlot[b.slot_id as string].push({
+          id:          b.id as string,
+          slotId:      b.slot_id as string,
+          eventId:     b.event_id as string,
+          userId:      b.user_id as string,
+          userName:    (b.profiles?.name as string) ?? '',
+          userAvatar:  (b.profiles?.avatar as string) ?? '',
+          createdAt:   b.created_at as string,
+        });
+      }
+
+      // Group slots by eventId, attach bookings
       const slots: Record<string, TimeSlot[]> = {};
       for (const row of (slotsRes.data ?? [])) {
         const slot = rowToSlot(row as Record<string, unknown>);
+        slot.bookings = bookingsBySlot[slot.id] ?? [];
         if (!slots[slot.eventId]) slots[slot.eventId] = [];
         slots[slot.eventId].push(slot);
       }
@@ -386,8 +405,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             userId:    o.user_id as string,
             status:    o.status as Order['status'],
             total:     Number(o.total),
-            subtotal:  Number(o.total),
-            shipping:  0,
+            subtotal:  o.subtotal != null ? Number(o.subtotal) : Number(o.total),
+            shipping:  o.shipping != null ? Number(o.shipping) : 0,
             address:   o.address as string,
             city:      o.city as string,
             createdAt: (o.created_at as string)?.slice(0, 10) ?? '',
@@ -655,15 +674,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const placeOrder = async (address: string, city: string): Promise<Order | null> => {
     const s = stateRef.current;
     if (!s.user || s.cart.length === 0) return null;
-    const shipping = cartTotal > 100 ? 0 : 8.9;
+    // Use stateRef cart to avoid stale closure on cartTotal
+    const subtotal = s.cart.reduce((acc, i) => acc + i.product.price * i.quantity, 0);
+    const shipping = subtotal > 100 ? 0 : 8.9;
     const orderId  = `ord_${Date.now()}`;
     const order: Order = {
       id:        orderId,
       userId:    s.user.id,
       items:     [...s.cart],
-      subtotal:  cartTotal,
+      subtotal,
       shipping,
-      total:     cartTotal + shipping,
+      total:     subtotal + shipping,
       status:    'confermato',
       address,
       city,
@@ -675,17 +696,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     // Persist to Supabase
     const { error: orderErr } = await supabase.from('orders').insert({
-      id:      orderId,
-      user_id: s.user.id,
-      status:  'confirmed',
-      total:   order.total,
+      id:       orderId,
+      user_id:  s.user.id,
+      status:   'confermato',
+      total:    order.total,
+      subtotal: order.subtotal,
+      shipping: order.shipping,
       address,
       city,
     });
-    if (orderErr) { console.error('placeOrder (orders):', orderErr); return order; }
+    if (orderErr) {
+      console.error('placeOrder (orders):', orderErr);
+      // Rollback optimistic dispatch
+      dispatch({ type: 'NOTIFY', message: `Errore nell\'ordine: ${orderErr.message}`, notifType: 'error' });
+      setTimeout(() => dispatch({ type: 'CLEAR_NOTIFY' }), 4000);
+      return null;
+    }
 
-    const itemRows = s.cart.map((item) => ({
-      id:          `oi_${item.product.id}_${Date.now()}`,
+    const ts = Date.now();
+    const itemRows = s.cart.map((item, idx) => ({
+      id:          `oi_${ts}_${idx}`,
       order_id:    orderId,
       product_id:  item.product.id,
       title:       item.product.title,
@@ -722,12 +752,80 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   // ── Slots ─────────────────────────────────────────────────────────────────
-  const bookSlot           = (eid: string, sid: string)              => dispatch({ type: 'BOOK_SLOT',            eventId: eid, slotId: sid });
-  const cancelBooking      = (eid: string, sid: string)              => dispatch({ type: 'CANCEL_BOOKING',       eventId: eid, slotId: sid });
+  const bookSlot = (eid: string, sid: string) => {
+    dispatch({ type: 'BOOK_SLOT', eventId: eid, slotId: sid });
+    if (!HAS_SUPABASE || !stateRef.current.user) return;
+    const user = stateRef.current.user;
+    const bookingId = `bk_${sid}_${Date.now()}`;
+    supabase.from('bookings').insert({
+      id:       bookingId,
+      slot_id:  sid,
+      event_id: eid,
+      user_id:  user.id,
+      status:   'confirmed',
+    }).then(({ error }) => {
+      if (error) {
+        console.error('bookSlot:', error);
+        dispatch({ type: 'CANCEL_BOOKING', eventId: eid, slotId: sid });
+        notifyErr(`Errore nella prenotazione: ${error.message}`);
+      } else {
+        // Sync booked counter: count bookings for this slot
+        supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('slot_id', sid)
+          .then(({ count }) => {
+            if (count != null) {
+              supabase.from('time_slots').update({ booked: count }).eq('id', sid).then(() => {});
+            }
+          });
+      }
+    });
+  };
+
+  const cancelBooking = (eid: string, sid: string) => {
+    dispatch({ type: 'CANCEL_BOOKING', eventId: eid, slotId: sid });
+    if (!HAS_SUPABASE || !stateRef.current.user) return;
+    const uid = stateRef.current.user.id;
+    supabase.from('bookings').delete()
+      .match({ slot_id: sid, user_id: uid })
+      .then(({ error }) => {
+        if (error) {
+          console.error('cancelBooking:', error);
+          notifyErr(`Errore nella cancellazione: ${error.message}`);
+        }
+      });
+  };
+
   const setSlotCapacity    = (eid: string, sid: string, cap: number) => dispatch({ type: 'SET_SLOT_CAPACITY',    eventId: eid, slotId: sid, capacity: cap });
-  const toggleSlotDisabled = (eid: string, sid: string)              => dispatch({ type: 'TOGGLE_SLOT_DISABLED', eventId: eid, slotId: sid });
-  const initEventSlots     = (eid: string, ts: string, te: string, cap: number) =>
+
+  const toggleSlotDisabled = (eid: string, sid: string) => {
+    dispatch({ type: 'TOGGLE_SLOT_DISABLED', eventId: eid, slotId: sid });
+    if (!HAS_SUPABASE) return;
+    // Read current disabled state and toggle in DB
+    const current = stateRef.current.slots[eid]?.find(s => s.id === sid);
+    if (!current) return;
+    const newDisabled = !current.disabled;
+    supabase.from('time_slots').update({ disabled: newDisabled }).eq('id', sid)
+      .then(({ error }) => { if (error) console.error('toggleSlotDisabled:', error); });
+  };
+
+  const initEventSlots = (eid: string, ts: string, te: string, cap: number) => {
     dispatch({ type: 'INIT_EVENT_SLOTS', eventId: eid, timeStart: ts, timeEnd: te, capacity: cap });
+    if (!HAS_SUPABASE) return;
+    // Persist generated slots to DB (do after reducer has generated them via generateSlots logic)
+    // Re-generate the same slots client-side to get the IDs
+    const generated = generateSlots(eid, ts, te, cap);
+    if (generated.length === 0) return;
+    const rows = generated.map(slot => ({
+      id:           slot.id,
+      event_id:     eid,
+      start_time:   slot.startTime,
+      end_time:     slot.endTime,
+      max_capacity: slot.maxCapacity,
+      disabled:     false,
+    }));
+    supabase.from('time_slots')
+      .upsert(rows, { onConflict: 'id' })
+      .then(({ error }) => { if (error) console.error('initEventSlots:', error); });
+  };
 
   const getUserBookedSlot = (eventId: string): TimeSlot | null => {
     if (!state.user) return null;

@@ -182,7 +182,7 @@ export default function EventDetail() {
               )}
 
               <div className="flex gap-2 mt-3">
-                <button onClick={() => notify('Link copiato!', 'info')} className="flex-1 btn-ghost justify-center text-xs">
+                <button onClick={() => { navigator.clipboard.writeText(window.location.href).catch(() => {}); notify('Link copiato!', 'info'); }} className="flex-1 btn-ghost justify-center text-xs">
                   <Share2 size={14} /> Condividi
                 </button>
                 <button onClick={() => notify('Evento salvato!', 'info')} className="flex-1 btn-ghost justify-center text-xs">
