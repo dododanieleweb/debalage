@@ -284,10 +284,10 @@ function reducer(state: State, action: Action): State {
 // ── Context interface ────────────────────────────────────────────────────────
 interface ContextValue {
   state: State;
-  // Auth
-  login:    (email: string, password: string) => Promise<boolean>;
+  // Auth — returns null on success, error string on failure
+  login:    (email: string, password: string) => Promise<string | null>;
   logout:   () => void;
-  register: (name: string, email: string, password: string, city: string, role: User['role']) => Promise<boolean>;
+  register: (name: string, email: string, password: string, city: string, role: User['role']) => Promise<string | null>;
   openAuth:  (mode: 'login' | 'register') => void;
   closeAuth: () => void;
   // Products
@@ -472,14 +472,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auth ──────────────────────────────────────────────────────────────────
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (email: string, password: string): Promise<string | null> => {
     if (!HAS_SUPABASE) {
-      const user = stateRef.current.users.find(u => u.email === email && u.password === password);
-      if (user) { dispatch({ type: 'LOGIN', payload: user }); return true; }
-      return false;
+      const user = stateRef.current.users.find(u => u.email === email && (u as unknown as Record<string,unknown>).password === password);
+      if (user) { dispatch({ type: 'LOGIN', payload: user }); return null; }
+      return 'Email o password non corretti.';
     }
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return !error;
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return error.message;
+    if (!data.user) return 'Login fallito. Riprova.';
+
+    // Load profile immediately so UI updates without waiting for onAuthStateChange
+    const { data: profile, error: profileErr } = await supabase
+      .from('profiles').select('*').eq('id', data.user.id).single();
+    if (profileErr) console.error('profile load on login:', profileErr.message);
+    if (profile) {
+      dispatch({ type: 'LOGIN', payload: rowToUser(profile as Record<string, unknown>) });
+    }
+    return null;
   };
 
   const logout = () => {
@@ -489,12 +499,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const register = async (
     name: string, email: string, password: string, city: string, role: User['role']
-  ): Promise<boolean> => {
+  ): Promise<string | null> => {
     if (!HAS_SUPABASE) {
-      if (stateRef.current.users.find(u => u.email === email)) return false;
+      if (stateRef.current.users.find(u => u.email === email)) return 'Email già registrata.';
       const newUser: User = {
         id:          `u_${Date.now()}`,
-        name, email, password, role, city,
+        name, email, role, city,
         avatar:      `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=8B6A3E&color=FAF7F2&size=200`,
         bio:         '',
         rating:      0,
@@ -505,7 +515,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         salesCount:  0,
       };
       dispatch({ type: 'REGISTER', payload: newUser });
-      return true;
+      return null;
     }
 
     const { data, error } = await supabase.auth.signUp({
@@ -513,11 +523,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       password,
       options: { data: { name, city, role } },
     });
-    if (error) return false;
+    if (error) return error.message;
 
-    // With mailer_autoconfirm enabled the session is immediately available.
-    // Pre-populate the user in state so the dashboard is usable right away,
-    // without waiting for onAuthStateChange to load the profile row.
+    // Pre-populate user in state immediately (mailer_autoconfirm is enabled).
+    // onAuthStateChange will overwrite with the real profile row once the
+    // DB trigger has created it.
     if (data.user) {
       const tempUser: User = {
         id:          data.user.id,
@@ -536,7 +546,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
       dispatch({ type: 'LOGIN', payload: tempUser });
     }
-    return true;
+    return null;
   };
 
   const openAuth  = (mode: 'login' | 'register') => dispatch({ type: 'OPEN_AUTH', mode });

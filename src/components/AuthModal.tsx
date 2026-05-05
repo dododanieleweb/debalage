@@ -34,11 +34,21 @@ export default function AuthModal() {
 
     try {
       if (isLogin) {
-        const success = await login(email, password);
-        if (!success) {
-          setError('Email o password non corretti. Prova con demo@demo.com / demo');
+        const err = await login(email, password);
+        if (err) {
+          // Translate common Supabase error messages to Italian
+          if (err.toLowerCase().includes('invalid login') || err.toLowerCase().includes('invalid credentials')) {
+            setError('Email o password non corretti.');
+          } else if (err.toLowerCase().includes('email not confirmed')) {
+            setError('Email non confermata. Controlla la tua casella di posta.');
+          } else if (err.toLowerCase().includes('too many requests')) {
+            setError('Troppi tentativi. Aspetta qualche minuto e riprova.');
+          } else {
+            setError(err);
+          }
         } else {
           notify('Bentornato!');
+          closeAuth();
           resetForm();
         }
       } else {
@@ -46,15 +56,20 @@ export default function AuthModal() {
           setError('Compila tutti i campi richiesti.');
           return;
         }
-        if (password.length < 4) {
-          setError('La password deve essere di almeno 4 caratteri.');
+        if (password.length < 6) {
+          setError('La password deve essere di almeno 6 caratteri.');
           return;
         }
-        const success = await register(name.trim(), email, password, city.trim(), role);
-        if (!success) {
-          setError('Email già registrata. Accedi o usa un\'altra email.');
+        const err = await register(name.trim(), email, password, city.trim(), role);
+        if (err) {
+          if (err.toLowerCase().includes('already registered') || err.toLowerCase().includes('already exists')) {
+            setError('Email già registrata. Accedi o usa un\'altra email.');
+          } else {
+            setError(err);
+          }
         } else {
-          notify('Registrazione completata! Benvenuto!', 'success');
+          notify('Registrazione completata! Benvenuto su Debalage 🎉', 'success');
+          closeAuth();
           resetForm();
         }
       }
@@ -95,13 +110,6 @@ export default function AuthModal() {
 
         {/* Form */}
         <div className="px-8 py-7">
-          {/* Demo hint */}
-          {isLogin && (
-            <div className="mb-5 p-3 bg-vintage-50 border border-vintage-200 rounded-xl text-xs text-vintage-700 font-sans">
-              Demo: <strong>demo@demo.com</strong> / <strong>demo</strong>
-            </div>
-          )}
-
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Name (register only) */}
             {!isLogin && (
