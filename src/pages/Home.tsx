@@ -3,19 +3,122 @@ import { ArrowRight, Search, Star, Shield, Truck, Sparkles, CheckCircle2 } from 
 import { CATEGORIES } from '../data/mockData';
 import EventCard from '../components/EventCard';
 import ProductCard from '../components/ProductCard';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
+
+// Maps product category strings → CATEGORIES id
+const CATEGORY_MAP: Record<string, string> = {
+  abbigliamento: 'abbigliamento',
+  accessori:     'accessori',
+  gioielli:      'gioielli',
+  mobili:        'mobili',
+  illuminazione: 'mobili',
+  elettronica:   'elettronica',
+  vinili:        'elettronica',
+  ceramiche:     'ceramiche',
+  arte:          'ceramiche',
+  libri:         'libri',
+  stampe:        'libri',
+};
+
+function getCategoryId(category: string): string {
+  const key = category.toLowerCase().split(' ')[0];
+  return CATEGORY_MAP[key] ?? 'altro';
+}
+
+// Skeleton card placeholder shown while loading
+function SkeletonCard({ aspect = 'product' }: { aspect?: 'product' | 'event' }) {
+  return (
+    <div className={`rounded-3xl bg-cream-100 animate-pulse ${aspect === 'event' ? 'h-72' : 'h-80'}`} />
+  );
+}
 
 export default function Home() {
   const { state } = useApp();
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery]     = useState('');
   const [newsletterEmail, setNewsletterEmail] = useState('');
-  const [newsletterDone, setNewsletterDone] = useState(false);
+  const [newsletterDone, setNewsletterDone]   = useState(false);
   const navigate = useNavigate();
 
-  const featuredEvents   = state.events.filter(e => e.featured && e.status !== 'completed').slice(0, 3);
-  const featuredProducts = state.products.filter(p => p.featured && p.status === 'available').slice(0, 4);
-  const topSellers       = state.users.filter(u => u.role === 'seller' || u.role === 'both').slice(0, 4);
+  // ── Derived data ────────────────────────────────────────────────────────────
+
+  // Events: prefer featured, then fall back to soonest upcoming
+  const featuredEvents = useMemo(() => {
+    const upcoming = state.events.filter(e => e.status !== 'completed');
+    const featured = upcoming.filter(e => e.featured);
+    return (featured.length > 0 ? featured : upcoming).slice(0, 3);
+  }, [state.events]);
+
+  // Products: prefer featured, then fall back to most recent available
+  const featuredProducts = useMemo(() => {
+    const available = state.products.filter(p => p.status === 'available');
+    const featured  = available.filter(p => p.featured);
+    return (featured.length > 0 ? featured : available).slice(0, 4);
+  }, [state.products]);
+
+  // Sellers: prefer verified, highest rated
+  const topSellers = useMemo(() =>
+    [...state.users]
+      .filter(u => u.role === 'seller' || u.role === 'both')
+      .sort((a, b) => (b.verified ? 1 : 0) - (a.verified ? 1 : 0) || b.rating - a.rating)
+      .slice(0, 4),
+    [state.users]
+  );
+
+  // ── Real stats ───────────────────────────────────────────────────────────────
+  const stats = useMemo(() => {
+    const availableCount = state.products.filter(p => p.status === 'available').length;
+
+    const now = new Date();
+    const monthEventsCount = state.events.filter(e => {
+      const d = new Date(e.date);
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    }).length;
+
+    const sellers = state.users.filter(u => u.role === 'seller' || u.role === 'both');
+    const verifiedCount = sellers.filter(u => u.verified).length;
+
+    const ratingsWithValues = sellers.filter(u => u.rating > 0);
+    const avgRating = ratingsWithValues.length > 0
+      ? (ratingsWithValues.reduce((s, u) => s + u.rating, 0) / ratingsWithValues.length).toFixed(1)
+      : '—';
+
+    return [
+      {
+        value: availableCount > 0 ? `${availableCount.toLocaleString('it-IT')}` : '—',
+        label: 'Prodotti disponibili',
+      },
+      {
+        value: monthEventsCount > 0 ? String(monthEventsCount) : '—',
+        label: 'Eventi questo mese',
+      },
+      {
+        value: verifiedCount > 0 ? `${verifiedCount}` : sellers.length > 0 ? String(sellers.length) : '—',
+        label: 'Venditori verificati',
+      },
+      {
+        value: avgRating !== '—' ? `${avgRating}★` : '—',
+        label: 'Valutazione media',
+      },
+    ];
+  }, [state.products, state.events, state.users]);
+
+  // ── Real category counts ─────────────────────────────────────────────────────
+  const categoriesWithCount = useMemo(() => {
+    // Count available products per category id
+    const counts: Record<string, number> = {};
+    for (const p of state.products) {
+      if (p.status === 'available') {
+        const catId = getCategoryId(p.category);
+        counts[catId] = (counts[catId] ?? 0) + 1;
+      }
+    }
+    return CATEGORIES.map(cat => ({
+      ...cat,
+      // If we have real data use it, else keep the static placeholder count
+      count: state.products.length > 0 ? (counts[cat.id] ?? 0) : cat.count,
+    }));
+  }, [state.products]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,11 +127,12 @@ export default function Home() {
     }
   };
 
+  const isLoading = state.loading;
+
   return (
     <div className="pt-16">
       {/* Hero */}
       <section className="relative min-h-[90vh] flex items-center overflow-hidden bg-bark-900">
-        {/* Background image */}
         <div className="absolute inset-0">
           <img
             src="https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1600&h=900&fit=crop"
@@ -40,7 +144,6 @@ export default function Home() {
 
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
           <div className="max-w-xl">
-            {/* Label */}
             <div className="inline-flex items-center gap-2 bg-vintage-600/20 border border-vintage-500/30 text-vintage-300 px-4 py-2 rounded-full text-xs font-sans uppercase tracking-widest mb-6">
               <Sparkles size={12} />
               Il marketplace del vintage italiano
@@ -56,7 +159,6 @@ export default function Home() {
               Abbigliamento, mobili, gioielli, vinili e molto altro.
             </p>
 
-            {/* Search bar */}
             <form onSubmit={handleSearch} className="flex gap-2 mb-8">
               <div className="flex-1 relative">
                 <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-bark-400" />
@@ -87,25 +189,23 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Scroll indicator */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-cream-400">
           <span className="text-xs font-sans uppercase tracking-widest">Scopri</span>
           <div className="w-px h-8 bg-cream-400/40 animate-pulse" />
         </div>
       </section>
 
-      {/* Stats bar */}
+      {/* Stats bar — real data */}
       <section className="bg-bark-800 text-cream-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-            {[
-              { value: '2.400+', label: 'Prodotti disponibili' },
-              { value: '38', label: 'Eventi questo mese' },
-              { value: '180+', label: 'Venditori verificati' },
-              { value: '4.9★', label: 'Valutazione media' },
-            ].map(stat => (
+            {stats.map(stat => (
               <div key={stat.label}>
-                <div className="font-serif text-2xl text-cream-50">{stat.value}</div>
+                {isLoading ? (
+                  <div className="h-8 w-20 mx-auto bg-bark-700 rounded animate-pulse mb-1" />
+                ) : (
+                  <div className="font-serif text-2xl text-cream-50">{stat.value}</div>
+                )}
                 <div className="text-xs text-cream-400 font-sans mt-0.5">{stat.label}</div>
               </div>
             ))}
@@ -126,9 +226,18 @@ export default function Home() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {featuredEvents.map((event, i) => (
-            <EventCard key={event.id} event={event} featured={i === 0} />
-          ))}
+          {isLoading
+            ? Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} aspect="event" />)
+            : featuredEvents.length > 0
+              ? featuredEvents.map((event, i) => <EventCard key={event.id} event={event} featured={i === 0} />)
+              : (
+                <div className="col-span-3 py-16 text-center">
+                  <p className="text-4xl mb-3">🏠</p>
+                  <p className="font-serif text-xl text-bark-600">Nessun evento in programma</p>
+                  <p className="text-sm text-bark-400 font-sans mt-2">I nuovi eventi appariranno qui non appena saranno pubblicati.</p>
+                </div>
+              )
+          }
         </div>
 
         <div className="mt-6 text-center sm:hidden">
@@ -138,7 +247,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Categories */}
+      {/* Categories — real counts */}
       <section className="py-16 bg-cream-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-10">
@@ -147,7 +256,7 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-            {CATEGORIES.map(cat => (
+            {categoriesWithCount.map(cat => (
               <Link
                 key={cat.id}
                 to={`/prodotti?category=${cat.id}`}
@@ -155,7 +264,9 @@ export default function Home() {
               >
                 <span className="text-2xl">{cat.icon}</span>
                 <span className="text-xs font-medium text-bark-700 font-sans leading-tight">{cat.name}</span>
-                <span className="text-[10px] text-bark-400 font-sans">{cat.count}</span>
+                <span className="text-[10px] text-bark-400 font-sans">
+                  {isLoading ? '…' : cat.count > 0 ? cat.count : '0'}
+                </span>
               </Link>
             ))}
           </div>
@@ -175,9 +286,18 @@ export default function Home() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {featuredProducts.map(product => (
-            <ProductCard key={product.id} product={product} />
-          ))}
+          {isLoading
+            ? Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
+            : featuredProducts.length > 0
+              ? featuredProducts.map(product => <ProductCard key={product.id} product={product} />)
+              : (
+                <div className="col-span-4 py-16 text-center">
+                  <p className="text-4xl mb-3">🏷️</p>
+                  <p className="font-serif text-xl text-bark-600">Nessun prodotto disponibile</p>
+                  <p className="text-sm text-bark-400 font-sans mt-2">I prodotti caricati dai venditori appariranno qui.</p>
+                </div>
+              )
+          }
         </div>
 
         <div className="mt-8 text-center sm:hidden">
@@ -196,34 +316,54 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {topSellers.map(seller => (
-              <Link key={seller.id} to={`/venditore/${seller.id}`} className="group">
-                <div className="card p-6 text-center">
-                  <div className="relative mx-auto w-20 h-20 mb-4">
-                    <img
-                      src={seller.avatar}
-                      alt={seller.name}
-                      className="w-full h-full rounded-full object-cover ring-4 ring-cream-100 group-hover:ring-vintage-200 transition-all"
-                    />
-                    {seller.verified && (
-                      <span className="absolute -bottom-1 -right-1 w-6 h-6 bg-vintage-600 rounded-full flex items-center justify-center text-white text-[10px]">✓</span>
-                    )}
+            {isLoading
+              ? Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="card p-6 text-center animate-pulse">
+                    <div className="w-20 h-20 rounded-full bg-cream-200 mx-auto mb-4" />
+                    <div className="h-4 bg-cream-200 rounded w-3/4 mx-auto mb-2" />
+                    <div className="h-3 bg-cream-200 rounded w-1/2 mx-auto" />
                   </div>
-                  <h3 className="font-serif text-bark-900 font-semibold">{seller.name}</h3>
-                  <p className="text-xs text-bark-400 font-sans mb-3">{seller.city}</p>
-                  <div className="flex items-center justify-center gap-1 mb-3">
-                    <Star size={12} className="text-amber-400 fill-amber-400" />
-                    <span className="text-sm font-medium text-bark-700 font-sans">{seller.rating}</span>
-                    <span className="text-xs text-bark-400 font-sans">({seller.reviewCount})</span>
+                ))
+              : topSellers.length > 0
+                ? topSellers.map(seller => (
+                    <Link key={seller.id} to={`/venditore/${seller.id}`} className="group">
+                      <div className="card p-6 text-center">
+                        <div className="relative mx-auto w-20 h-20 mb-4">
+                          <img
+                            src={seller.avatar}
+                            alt={seller.name}
+                            className="w-full h-full rounded-full object-cover ring-4 ring-cream-100 group-hover:ring-vintage-200 transition-all"
+                          />
+                          {seller.verified && (
+                            <span className="absolute -bottom-1 -right-1 w-6 h-6 bg-vintage-600 rounded-full flex items-center justify-center text-white text-[10px]">✓</span>
+                          )}
+                        </div>
+                        <h3 className="font-serif text-bark-900 font-semibold">{seller.name}</h3>
+                        <p className="text-xs text-bark-400 font-sans mb-3">{seller.city}</p>
+                        {seller.rating > 0 && (
+                          <div className="flex items-center justify-center gap-1 mb-3">
+                            <Star size={12} className="text-amber-400 fill-amber-400" />
+                            <span className="text-sm font-medium text-bark-700 font-sans">{seller.rating}</span>
+                            <span className="text-xs text-bark-400 font-sans">({seller.reviewCount})</span>
+                          </div>
+                        )}
+                        {seller.specialties.length > 0 && (
+                          <div className="flex flex-wrap justify-center gap-1">
+                            {seller.specialties.slice(0, 2).map(s => (
+                              <span key={s} className="badge bg-cream-100 text-bark-600">{s}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </Link>
+                  ))
+                : (
+                  <div className="col-span-4 py-16 text-center">
+                    <p className="text-4xl mb-3">👤</p>
+                    <p className="font-serif text-xl text-bark-600">Nessun venditore ancora</p>
                   </div>
-                  <div className="flex flex-wrap justify-center gap-1">
-                    {seller.specialties.slice(0, 2).map(s => (
-                      <span key={s} className="badge bg-cream-100 text-bark-600">{s}</span>
-                    ))}
-                  </div>
-                </div>
-              </Link>
-            ))}
+                )
+            }
           </div>
 
           <div className="text-center mt-8">
@@ -256,7 +396,7 @@ export default function Home() {
             {
               icon: <Truck size={28} className="text-vintage-600" />,
               title: 'Ritiro o spedizione',
-              desc: 'Scegli di ritirare il pezzo direttamente all\'evento o di riceverlo a casa con imballaggio sicuro e assicurato.',
+              desc: "Scegli di ritirare il pezzo direttamente all'evento o di riceverlo a casa con imballaggio sicuro e assicurato.",
             },
           ].map(item => (
             <div key={item.title} className="p-8 rounded-3xl bg-cream-100 border border-cream-200">
@@ -288,9 +428,7 @@ export default function Home() {
               className="flex gap-2 max-w-md mx-auto"
               onSubmit={e => {
                 e.preventDefault();
-                if (newsletterEmail.trim()) {
-                  setNewsletterDone(true);
-                }
+                if (newsletterEmail.trim()) setNewsletterDone(true);
               }}
             >
               <input
