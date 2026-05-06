@@ -105,7 +105,7 @@ export default function Home() {
 
   // ── Real category counts ─────────────────────────────────────────────────────
   const categoriesWithCount = useMemo(() => {
-    // Count available products per category id
+    // Count available products per category id — always real, never mock
     const counts: Record<string, number> = {};
     for (const p of state.products) {
       if (p.status === 'available') {
@@ -113,11 +113,7 @@ export default function Home() {
         counts[catId] = (counts[catId] ?? 0) + 1;
       }
     }
-    return CATEGORIES.map(cat => ({
-      ...cat,
-      // If we have real data use it, else keep the static placeholder count
-      count: state.products.length > 0 ? (counts[cat.id] ?? 0) : cat.count,
-    }));
+    return CATEGORIES.map(cat => ({ ...cat, count: counts[cat.id] ?? 0 }));
   }, [state.products]);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -264,9 +260,13 @@ export default function Home() {
               >
                 <span className="text-2xl">{cat.icon}</span>
                 <span className="text-xs font-medium text-bark-700 font-sans leading-tight">{cat.name}</span>
-                <span className="text-[10px] text-bark-400 font-sans">
-                  {isLoading ? '…' : cat.count > 0 ? cat.count : '0'}
-                </span>
+                {isLoading ? (
+                  <span className="block h-3 w-8 bg-cream-200 rounded animate-pulse mx-auto" />
+                ) : (
+                  <span className="text-[10px] text-bark-400 font-sans">
+                    {cat.count} {cat.count === 1 ? 'pezzo' : 'pezzi'}
+                  </span>
+                )}
               </Link>
             ))}
           </div>
