@@ -351,8 +351,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         supabase.from('products').select('*').order('created_at', { ascending: false }),
         supabase.from('profiles').select('*'),
         supabase.from('time_slots').select('*'),
-        // Bookings with user info joined; anon users see 0 rows (RLS), that's OK.
-        supabase.from('bookings').select('id, slot_id, event_id, user_id, created_at, profiles!user_id(name, avatar)'),
+        // Simple bookings query — no join, avoid permission issues with anon users
+        supabase.from('bookings').select('id, slot_id, event_id, user_id, created_at'),
       ]);
 
       // Log individual query errors without aborting
@@ -409,57 +409,82 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 2. Auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
+        const su = session.user;
+        const meta = (su.user_metadata ?? {}) as Record<string, unknown>;
+
+        // Always dispatch a tempUser immediately from session metadata so the
+        // UI is never stuck waiting for the DB profile query.
+        const tempUser: User = {
+          id:          su.id,
+          name:        (meta.name as string) || su.email?.split('@')[0] || '',
+          email:       su.email ?? '',
+          role:        (meta.role as User['role']) ?? 'buyer',
+          city:        (meta.city as string) ?? '',
+          avatar:      `https://ui-avatars.com/api/?name=${encodeURIComponent((meta.name as string) || su.email || '')}&background=8B6A3E&color=FAF7F2&size=200`,
+          bio:         '',
+          rating:      0,
+          reviewCount: 0,
+          joinedAt:    su.created_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+          specialties: [],
+          verified:    false,
+          salesCount:  0,
+        };
+        // Only dispatch if not already logged in as this user (avoids overwriting
+        // the richer tempUser dispatched directly by login())
+        if (stateRef.current.user?.id !== su.id) {
+          dispatch({ type: 'LOGIN', payload: tempUser });
+        }
+
         // Load profile for logged-in user
         const { data: profile } = await supabase
           .from('profiles')
           .select('*')
-          .eq('id', session.user.id)
+          .eq('id', su.id)
           .single();
 
         if (profile) {
-          const user = rowToUser(profile as Record<string, unknown>);
-          dispatch({ type: 'LOGIN', payload: user });
-
-          // Load user-specific data
-          const [wishRes, ordersRes] = await Promise.all([
-            supabase.from('wishlists').select('product_id').eq('user_id', session.user.id),
-            supabase.from('orders').select('*, order_items(*)').eq('user_id', session.user.id).order('created_at', { ascending: false }),
-          ]);
-
-          dispatch({ type: 'SET_WISHLIST', ids: (wishRes.data ?? []).map((w: Record<string, unknown>) => w.product_id as string) });
-
-          const orders: Order[] = (ordersRes.data ?? []).map((o: Record<string, unknown>) => ({
-            id:        o.id as string,
-            userId:    o.user_id as string,
-            status:    o.status as Order['status'],
-            total:     Number(o.total),
-            subtotal:  o.subtotal != null ? Number(o.subtotal) : Number(o.total),
-            shipping:  o.shipping != null ? Number(o.shipping) : 0,
-            address:   o.address as string,
-            city:      o.city as string,
-            createdAt: (o.created_at as string)?.slice(0, 10) ?? '',
-            items:     ((o.order_items as Record<string, unknown>[]) ?? []).map((item: Record<string, unknown>) => ({
-              product: {
-                id:          item.product_id as string,
-                title:       item.title as string,
-                price:       Number(item.price),
-                images:      [item.image as string],
-                sellerId:    (item.seller_id as string) ?? '',
-                description: '',
-                category:    '',
-                condition:   'buono' as const,
-                tags:        [],
-                status:      'sold' as const,
-                featured:    false,
-                views:       0,
-                saves:       0,
-                createdAt:   '',
-              },
-              quantity: 1,
-            })),
-          }));
-          dispatch({ type: 'SET_ORDERS', orders });
+          dispatch({ type: 'LOGIN', payload: rowToUser(profile as Record<string, unknown>) });
         }
+
+        // Load user-specific data (wishlist + orders) in parallel
+        const [wishRes, ordersRes] = await Promise.all([
+          supabase.from('wishlists').select('product_id').eq('user_id', su.id),
+          supabase.from('orders').select('*, order_items(*)').eq('user_id', su.id).order('created_at', { ascending: false }),
+        ]);
+
+        dispatch({ type: 'SET_WISHLIST', ids: (wishRes.data ?? []).map((w: Record<string, unknown>) => w.product_id as string) });
+
+        const orders: Order[] = (ordersRes.data ?? []).map((o: Record<string, unknown>) => ({
+          id:        o.id as string,
+          userId:    o.user_id as string,
+          status:    o.status as Order['status'],
+          total:     Number(o.total),
+          subtotal:  o.subtotal != null ? Number(o.subtotal) : Number(o.total),
+          shipping:  o.shipping != null ? Number(o.shipping) : 0,
+          address:   o.address as string,
+          city:      o.city as string,
+          createdAt: (o.created_at as string)?.slice(0, 10) ?? '',
+          items:     ((o.order_items as Record<string, unknown>[]) ?? []).map((item: Record<string, unknown>) => ({
+            product: {
+              id:          item.product_id as string,
+              title:       item.title as string,
+              price:       Number(item.price),
+              images:      [item.image as string],
+              sellerId:    (item.seller_id as string) ?? '',
+              description: '',
+              category:    '',
+              condition:   'buono' as const,
+              tags:        [],
+              status:      'sold' as const,
+              featured:    false,
+              views:       0,
+              saves:       0,
+              createdAt:   '',
+            },
+            quantity: 1,
+          })),
+        }));
+        dispatch({ type: 'SET_ORDERS', orders });
       } else if (event === 'SIGNED_OUT') {
         dispatch({ type: 'LOGOUT' });
       }
@@ -482,13 +507,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (error) return error.message;
     if (!data.user) return 'Login fallito. Riprova.';
 
-    // Load profile immediately so UI updates without waiting for onAuthStateChange
-    const { data: profile, error: profileErr } = await supabase
-      .from('profiles').select('*').eq('id', data.user.id).single();
-    if (profileErr) console.error('profile load on login:', profileErr.message);
-    if (profile) {
-      dispatch({ type: 'LOGIN', payload: rowToUser(profile as Record<string, unknown>) });
-    }
+    // Dispatch an immediate tempUser built from auth metadata so the UI
+    // is usable right away — no extra DB round-trip inside login().
+    // onAuthStateChange fires next and overwrites with the full profile row.
+    const meta = (data.user.user_metadata ?? {}) as Record<string, unknown>;
+    const tempUser: User = {
+      id:          data.user.id,
+      name:        (meta.name as string) || email.split('@')[0],
+      email:       data.user.email ?? email,
+      role:        (meta.role as User['role']) ?? 'buyer',
+      city:        (meta.city as string) ?? '',
+      avatar:      `https://ui-avatars.com/api/?name=${encodeURIComponent((meta.name as string) || email)}&background=8B6A3E&color=FAF7F2&size=200`,
+      bio:         '',
+      rating:      0,
+      reviewCount: 0,
+      joinedAt:    data.user.created_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+      specialties: [],
+      verified:    false,
+      salesCount:  0,
+    };
+    dispatch({ type: 'LOGIN', payload: tempUser });
+
+    // Load full profile in background (updates avatar, rating, etc.)
+    void supabase.from('profiles').select('*').eq('id', data.user.id).single()
+      .then(({ data: profile }) => {
+        if (profile) dispatch({ type: 'LOGIN', payload: rowToUser(profile as Record<string, unknown>) });
+      });
+
     return null;
   };
 
