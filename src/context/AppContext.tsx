@@ -107,6 +107,7 @@ interface State {
   notification: { message: string; type: 'success' | 'error' | 'info' } | null;
   slots:        Record<string, TimeSlot[]>;
   loading:      boolean;
+  eventFee:     number;   // quota che il venditore paga per pubblicare un evento
 }
 
 type Action =
@@ -145,7 +146,8 @@ type Action =
   | { type: 'CANCEL_BOOKING';      eventId: string; slotId: string }
   | { type: 'SET_SLOT_CAPACITY';   eventId: string; slotId: string; capacity: number }
   | { type: 'TOGGLE_SLOT_DISABLED';eventId: string; slotId: string }
-  | { type: 'INIT_EVENT_SLOTS';    eventId: string; timeStart: string; timeEnd: string; capacity: number };
+  | { type: 'INIT_EVENT_SLOTS';    eventId: string; timeStart: string; timeEnd: string; capacity: number }
+  | { type: 'SET_EVENT_FEE'; fee: number };
 
 const initialState: State = {
   user:         null,
@@ -160,6 +162,7 @@ const initialState: State = {
   notification: null,
   slots:        HAS_SUPABASE ? {} : INITIAL_SLOTS,
   loading:      HAS_SUPABASE,
+  eventFee:     0,
 };
 
 function reducer(state: State, action: Action): State {
@@ -178,6 +181,8 @@ function reducer(state: State, action: Action): State {
     case 'SET_LOADING': return { ...state, loading: action.value };
     case 'INIT_DATA':
       return { ...state, users: action.users, products: action.products, events: action.events, slots: action.slots, loading: false };
+    case 'SET_EVENT_FEE':
+      return { ...state, eventFee: action.fee };
     case 'SET_WISHLIST': return { ...state, wishlist: action.ids };
     case 'SET_ORDERS':   return { ...state, orders: action.orders };
 
@@ -316,6 +321,8 @@ interface ContextValue {
   toggleSlotDisabled: (eventId: string, slotId: string) => void;
   initEventSlots:     (eventId: string, timeStart: string, timeEnd: string, capacity: number) => void;
   getUserBookedSlot:  (eventId: string) => TimeSlot | null;
+  // Admin
+  updateEventFee: (fee: number) => Promise<void>;
   // Computed
   cartCount: number;
   cartTotal: number;
@@ -346,13 +353,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // 1. Load public data (products, events, profiles, slots, bookings)
     const loadData = async () => {
       // Run all queries concurrently; each returns {data, error} — never throws.
-      const [eventsRes, productsRes, profilesRes, slotsRes, bookingsRes] = await Promise.all([
+      const [eventsRes, productsRes, profilesRes, slotsRes, bookingsRes, settingsRes] = await Promise.all([
         supabase.from('events').select('*').order('date', { ascending: true }),
         supabase.from('products').select('*').order('created_at', { ascending: false }),
         supabase.from('profiles').select('*'),
         supabase.from('time_slots').select('*'),
         // Simple bookings query — no join, avoid permission issues with anon users
         supabase.from('bookings').select('id, slot_id, event_id, user_id, created_at'),
+        supabase.from('app_settings').select('key, value'),
       ]);
 
       // Log individual query errors without aborting
@@ -361,6 +369,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (profilesRes.error) console.error('load profiles:', profilesRes.error.message);
       if (slotsRes.error)    console.error('load slots:',    slotsRes.error.message);
       if (bookingsRes.error) console.error('load bookings:', bookingsRes.error.message);
+      if (settingsRes.error) console.error('load settings:', settingsRes.error.message);
 
       const events   = (eventsRes.data   ?? []).map(rowToEvent);
       const products = (productsRes.data ?? []).map(rowToProduct);
@@ -394,6 +403,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!slots[slot.eventId]) slots[slot.eventId] = [];
         slots[slot.eventId].push(slot);
       }
+
+      // Load app settings (e.g. event_fee)
+      const feeRow = (settingsRes.data ?? []).find((r: Record<string, unknown>) => r.key === 'event_fee');
+      if (feeRow) dispatch({ type: 'SET_EVENT_FEE', fee: Number(feeRow.value) });
 
       dispatch({ type: 'INIT_DATA', users, products, events, slots });
       clearTimeout(loadingTimeout);
@@ -913,6 +926,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .then(({ error }) => { if (error) console.error('initEventSlots:', error); });
   };
 
+  // ── Admin ─────────────────────────────────────────────────────────────────
+  const updateEventFee = async (fee: number): Promise<void> => {
+    dispatch({ type: 'SET_EVENT_FEE', fee });
+    if (!HAS_SUPABASE) return;
+    const { error } = await supabase
+      .from('app_settings')
+      .upsert({ key: 'event_fee', value: String(fee) }, { onConflict: 'key' });
+    if (error) {
+      console.error('updateEventFee:', error);
+      notifyErr(`Errore nel salvataggio della quota: ${error.message}`);
+    }
+  };
+
   const getUserBookedSlot = (eventId: string): TimeSlot | null => {
     if (!state.user) return null;
     return state.slots[eventId]?.find(s => s.bookings.some(b => b.userId === state.user!.id)) ?? null;
@@ -926,7 +952,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addToCart, removeFromCart, updateQuantity, clearCart,
       placeOrder, toggleWishlist, notify, cartCount, cartTotal,
       bookSlot, cancelBooking, setSlotCapacity, toggleSlotDisabled,
-      initEventSlots, getUserBookedSlot,
+      initEventSlots, getUserBookedSlot, updateEventFee,
     }}>
       {children}
     </AppContext.Provider>

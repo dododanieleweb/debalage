@@ -14,7 +14,7 @@ create table if not exists public.profiles (
   name         text        not null,
   email        text        not null,
   city         text        not null default '',
-  role         text        not null default 'buyer'   check (role in ('buyer','seller','both')),
+  role         text        not null default 'buyer'   check (role in ('buyer','seller','both','admin')),
   avatar       text        not null default '',
   bio          text        not null default '',
   specialties  text[]      not null default '{}',
@@ -232,3 +232,36 @@ alter table public.wishlists enable row level security;
 
 create policy "wishlists: manage own"
   on public.wishlists for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ============================================================
+--  APP SETTINGS  (key-value store for platform configuration)
+-- ============================================================
+create table if not exists public.app_settings (
+  key        text primary key,
+  value      text        not null default '',
+  updated_at timestamptz not null default now()
+);
+
+alter table public.app_settings enable row level security;
+
+-- Everyone can read settings (e.g. to show the event fee to sellers)
+create policy "app_settings: read all"
+  on public.app_settings for select using (true);
+
+-- Only admins can insert/update settings
+create policy "app_settings: admin insert"
+  on public.app_settings for insert
+  with check (
+    exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
+  );
+
+create policy "app_settings: admin update"
+  on public.app_settings for update
+  using (
+    exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
+  );
+
+-- Seed default values (run idempotently)
+insert into public.app_settings (key, value)
+  values ('event_fee', '0')
+  on conflict (key) do nothing;

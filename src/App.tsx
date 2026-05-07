@@ -17,6 +17,7 @@ import Cart from './pages/Cart';
 import Wishlist from './pages/Wishlist';
 import Dashboard from './pages/Dashboard';
 import Orders from './pages/Orders';
+import AdminDashboard from './pages/AdminDashboard';
 import ComeFunziona from './pages/ComeFunziona';
 import Commissioni from './pages/Commissioni';
 import GuideFotografiche from './pages/GuideFotografiche';
@@ -59,6 +60,7 @@ function AppShell() {
           <Route path="/wishlist" element={<Wishlist />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/ordini" element={<Orders />} />
+          <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/come-funziona" element={<ComeFunziona />} />
           <Route path="/commissioni" element={<Commissioni />} />
           <Route path="/guide-fotografiche" element={<GuideFotografiche />} />

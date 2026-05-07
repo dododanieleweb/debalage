@@ -1,4 +1,4 @@
-export type UserRole = 'buyer' | 'seller' | 'both';
+export type UserRole = 'buyer' | 'seller' | 'both' | 'admin';
 export type EventType = 'casa_privata' | 'mercatino' | 'mostra' | 'pop_up';
 export type EventStatus = 'upcoming' | 'ongoing' | 'completed';
 export type ProductCondition = 'come_nuovo' | 'ottimo' | 'buono' | 'discreto';

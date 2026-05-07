@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { ShoppingBag, Heart, Menu, X, Search, User, LogOut, LayoutDashboard, ChevronDown, Package } from 'lucide-react';
+import { ShoppingBag, Heart, Menu, X, Search, User, LogOut, LayoutDashboard, ChevronDown, Package, Shield } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 export default function Navbar() {
@@ -137,6 +137,15 @@ export default function Navbar() {
                         <p className="text-sm font-medium text-bark-900">{state.user.name}</p>
                         <p className="text-xs text-bark-400">{state.user.city}</p>
                       </div>
+                      {state.user.role === 'admin' && (
+                        <Link
+                          to="/admin"
+                          className="flex items-center gap-3 px-4 py-2 text-sm text-rose-700 hover:bg-rose-50 transition-colors font-medium"
+                        >
+                          <Shield size={16} />
+                          Pannello admin
+                        </Link>
+                      )}
                       {(state.user.role === 'seller' || state.user.role === 'both') && (
                         <Link
                           to="/dashboard"
