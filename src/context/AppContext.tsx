@@ -346,61 +346,64 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!HAS_SUPABASE) return;
 
-    // Safety net: if data never loads (network error, bad credentials, etc.)
-    // force loading:false after 6 seconds so the app doesn't hang forever.
+    // Safety net: force loading:false after 3 s so the app never hangs.
     const loadingTimeout = setTimeout(() => {
       if (stateRef.current.loading) {
         console.warn('Supabase loadData timeout — forcing loading:false');
         dispatch({ type: 'INIT_DATA', users: [], products: [], events: [], slots: {} });
       }
-    }, 6000);
+    }, 3000);
 
-    // 1. Load public data (products, events, profiles, slots, bookings)
-    const loadData = async () => {
-      // Run all queries concurrently; each returns {data, error} — never throws.
-      const [eventsRes, productsRes, profilesRes, slotsRes, bookingsRes, settingsRes] = await Promise.all([
+    // ── Phase 1: critical data (blocks the loading screen) ───────────────────
+    // Only the data needed to render the home/list pages immediately.
+    // Slots & bookings are deferred to Phase 2 so the app appears faster.
+    const loadCritical = async () => {
+      const [eventsRes, productsRes, profilesRes, settingsRes] = await Promise.all([
         supabase.from('events').select('*').order('date', { ascending: true }),
         supabase.from('products').select('*').order('created_at', { ascending: false }),
         supabase.from('profiles').select('*'),
-        supabase.from('time_slots').select('*'),
-        // Simple bookings query — no join, avoid permission issues with anon users
-        supabase.from('bookings').select('id, slot_id, event_id, user_id, created_at'),
         supabase.from('app_settings').select('key, value'),
       ]);
 
-      // Log individual query errors without aborting
       if (eventsRes.error)   console.error('load events:',   eventsRes.error.message);
       if (productsRes.error) console.error('load products:', productsRes.error.message);
       if (profilesRes.error) console.error('load profiles:', profilesRes.error.message);
-      if (slotsRes.error)    console.error('load slots:',    slotsRes.error.message);
-      if (bookingsRes.error) console.error('load bookings:', bookingsRes.error.message);
       if (settingsRes.error) console.error('load settings:', settingsRes.error.message);
 
       const events   = (eventsRes.data   ?? []).map(rowToEvent);
       const products = (productsRes.data ?? []).map(rowToProduct);
       const users    = (profilesRes.data ?? []).map(rowToUser);
 
-      // Build bookings map: slotId → bookings array
-      type ProfileRef = { name?: string; avatar?: string } | { name?: string; avatar?: string }[] | null;
-      type BookingRow = { id: string; slot_id: string; event_id: string; user_id: string; created_at: string; profiles?: ProfileRef };
+      // App settings (event fee, etc.)
+      const feeRow = (settingsRes.data ?? []).find((r: Record<string, unknown>) => r.key === 'event_fee');
+      if (feeRow) dispatch({ type: 'SET_EVENT_FEE', fee: Number(feeRow.value) });
+
+      // Unlock the UI immediately with empty slots — Phase 2 fills them in
+      dispatch({ type: 'INIT_DATA', users, products, events, slots: {} });
+      clearTimeout(loadingTimeout);
+    };
+
+    // ── Phase 2: deferred data (slots + bookings, needed only on event detail) ─
+    const loadDeferred = async () => {
+      const [slotsRes, bookingsRes] = await Promise.all([
+        supabase.from('time_slots').select('*'),
+        supabase.from('bookings').select('id, slot_id, event_id, user_id, created_at'),
+      ]);
+
+      if (slotsRes.error)    console.error('load slots:',    slotsRes.error.message);
+      if (bookingsRes.error) console.error('load bookings:', bookingsRes.error.message);
+
+      type BookingRow = { id: string; slot_id: string; event_id: string; user_id: string; created_at: string };
       const bookingsBySlot: Record<string, TimeSlot['bookings']> = {};
       for (const b of ((bookingsRes.data ?? []) as unknown as BookingRow[])) {
         const slotId = b.slot_id;
         if (!bookingsBySlot[slotId]) bookingsBySlot[slotId] = [];
-        // profiles may be a single object or array (Supabase join)
-        const prof = Array.isArray(b.profiles) ? b.profiles[0] : b.profiles;
         bookingsBySlot[slotId].push({
-          id:          b.id,
-          slotId,
-          eventId:     b.event_id,
-          userId:      b.user_id,
-          userName:    prof?.name ?? '',
-          userAvatar:  prof?.avatar ?? '',
-          createdAt:   b.created_at,
+          id: b.id, slotId, eventId: b.event_id,
+          userId: b.user_id, userName: '', userAvatar: '', createdAt: b.created_at,
         });
       }
 
-      // Group slots by eventId, attach bookings
       const slots: Record<string, TimeSlot[]> = {};
       for (const row of (slotsRes.data ?? [])) {
         const slot = rowToSlot(row as Record<string, unknown>);
@@ -409,20 +412,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
         slots[slot.eventId].push(slot);
       }
 
-      // Load app settings (e.g. event_fee)
-      const feeRow = (settingsRes.data ?? []).find((r: Record<string, unknown>) => r.key === 'event_fee');
-      if (feeRow) dispatch({ type: 'SET_EVENT_FEE', fee: Number(feeRow.value) });
-
-      dispatch({ type: 'INIT_DATA', users, products, events, slots });
-      clearTimeout(loadingTimeout);
+      // Merge slots into existing state without touching loading flag
+      dispatch({ type: 'INIT_DATA',
+        users:    stateRef.current.users,
+        products: stateRef.current.products,
+        events:   stateRef.current.events,
+        slots,
+      });
     };
 
-    // Always clear loading even on catastrophic failure
-    loadData().catch(err => {
-      console.error('loadData fatal:', err);
-      dispatch({ type: 'INIT_DATA', users: [], products: [], events: [], slots: {} });
-      clearTimeout(loadingTimeout);
-    });
+    // Run Phase 1 — when done, kick off Phase 2 in background
+    loadCritical()
+      .then(() => loadDeferred().catch(err => console.error('loadDeferred:', err)))
+      .catch(err => {
+        console.error('loadCritical fatal:', err);
+        dispatch({ type: 'INIT_DATA', users: [], products: [], events: [], slots: {} });
+        clearTimeout(loadingTimeout);
+      });
 
     // 2. Auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
