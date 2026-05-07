@@ -107,6 +107,7 @@ interface State {
   notification: { message: string; type: 'success' | 'error' | 'info' } | null;
   slots:        Record<string, TimeSlot[]>;
   loading:      boolean;
+  authLoading:  boolean;  // true finché il profilo DB non è caricato dopo onAuthStateChange
   eventFee:     number;   // quota che il venditore paga per pubblicare un evento
 }
 
@@ -147,7 +148,8 @@ type Action =
   | { type: 'SET_SLOT_CAPACITY';   eventId: string; slotId: string; capacity: number }
   | { type: 'TOGGLE_SLOT_DISABLED';eventId: string; slotId: string }
   | { type: 'INIT_EVENT_SLOTS';    eventId: string; timeStart: string; timeEnd: string; capacity: number }
-  | { type: 'SET_EVENT_FEE'; fee: number };
+  | { type: 'SET_EVENT_FEE'; fee: number }
+  | { type: 'SET_AUTH_LOADING'; value: boolean };
 
 const initialState: State = {
   user:         null,
@@ -162,6 +164,7 @@ const initialState: State = {
   notification: null,
   slots:        HAS_SUPABASE ? {} : INITIAL_SLOTS,
   loading:      HAS_SUPABASE,
+  authLoading:  HAS_SUPABASE,  // aspetta fino al primo onAuthStateChange
   eventFee:     0,
 };
 
@@ -183,6 +186,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, users: action.users, products: action.products, events: action.events, slots: action.slots, loading: false };
     case 'SET_EVENT_FEE':
       return { ...state, eventFee: action.fee };
+    case 'SET_AUTH_LOADING':
+      return { ...state, authLoading: action.value };
     case 'SET_WISHLIST': return { ...state, wishlist: action.ids };
     case 'SET_ORDERS':   return { ...state, orders: action.orders };
 
@@ -425,8 +430,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const su = session.user;
         const meta = (su.user_metadata ?? {}) as Record<string, unknown>;
 
-        // Always dispatch a tempUser immediately from session metadata so the
-        // UI is never stuck waiting for the DB profile query.
+        // Mark auth as loading — the role from metadata may be stale (e.g. if admin
+        // role was set directly in the DB after registration). We must NOT redirect
+        // role-protected pages until the real profile arrives from the DB.
+        dispatch({ type: 'SET_AUTH_LOADING', value: true });
+
+        // Dispatch a tempUser from session metadata immediately so the UI
+        // is responsive (navbar, avatar) while the profile query runs.
+        // Role-protected pages (AdminDashboard) will wait for authLoading:false.
         const tempUser: User = {
           id:          su.id,
           name:        (meta.name as string) || su.email?.split('@')[0] || '',
@@ -442,13 +453,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           verified:    false,
           salesCount:  0,
         };
-        // Only dispatch if not already logged in as this user (avoids overwriting
-        // the richer tempUser dispatched directly by login())
         if (stateRef.current.user?.id !== su.id) {
           dispatch({ type: 'LOGIN', payload: tempUser });
         }
 
-        // Load profile for logged-in user
+        // Load the real profile from DB — this is the source of truth for role
         const { data: profile } = await supabase
           .from('profiles')
           .select('*')
@@ -458,6 +467,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (profile) {
           dispatch({ type: 'LOGIN', payload: rowToUser(profile as Record<string, unknown>) });
         }
+
+        // Auth is now resolved — role-protected pages can evaluate their guard
+        dispatch({ type: 'SET_AUTH_LOADING', value: false });
 
         // Load user-specific data (wishlist + orders) in parallel
         const [wishRes, ordersRes] = await Promise.all([
@@ -498,8 +510,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           })),
         }));
         dispatch({ type: 'SET_ORDERS', orders });
-      } else if (event === 'SIGNED_OUT') {
-        dispatch({ type: 'LOGOUT' });
+      } else {
+        // No session (SIGNED_OUT or no user) — auth check complete
+        dispatch({ type: 'SET_AUTH_LOADING', value: false });
+        if (event === 'SIGNED_OUT') {
+          dispatch({ type: 'LOGOUT' });
+        }
       }
     });
 

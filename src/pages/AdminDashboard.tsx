@@ -26,8 +26,22 @@ const ROLE_COLORS: Record<string, string> = {
 export default function AdminDashboard() {
   const { state, updateEventFee, notify } = useApp();
 
-  // Guard: only admin can access
-  if (!state.loading && (!state.user || state.user.role !== 'admin')) {
+  // Guard: wait for both data loading AND auth/profile loading to complete
+  // before evaluating the role. Without this, a stale tempUser with the
+  // registration-time role (e.g. 'both') would trigger a redirect before the
+  // real profile (role='admin') arrives from the DB.
+  if (state.loading || state.authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-cream-50">
+        <div className="text-center">
+          <div className="w-10 h-10 border-4 border-vintage-300 border-t-vintage-600 rounded-full animate-spin mx-auto mb-3" />
+          <p className="font-serif text-bark-500">Verifica accesso…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!state.user || state.user.role !== 'admin') {
     return <Navigate to="/" replace />;
   }
 
