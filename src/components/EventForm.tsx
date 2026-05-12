@@ -3,6 +3,7 @@ import { X, Plus } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Event, EventType, EventStatus } from '../types';
 import { EVENT_TYPES } from '../data/mockData';
+import ImageUploader from './ImageUploader';
 
 interface Props {
   initial?: Event;
@@ -256,23 +257,19 @@ export default function EventForm({ initial, onClose }: Props) {
           {/* Image */}
           <div>
             <label className="block text-xs font-medium text-bark-600 mb-1.5 font-sans uppercase tracking-wide">
-              URL immagine copertina <span className="text-rose-500">*</span>
+              Immagine copertina <span className="text-rose-500">*</span>
             </label>
-            <input
-              type="url"
-              value={image}
-              onChange={e => setImage(e.target.value)}
-              className="input"
-              placeholder="https://images.unsplash.com/..."
-              required
+            <ImageUploader
+              folder="events"
+              userId={state.user!.id}
+              maxFiles={1}
+              value={image ? [image] : []}
+              onChange={urls => setImage(urls[0] ?? '')}
             />
-            {image && (
-              <img
-                src={image}
-                alt="preview"
-                className="mt-2 h-28 w-full object-cover rounded-xl"
-                onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-              />
+            {!image && (
+              <p className="mt-1.5 text-xs text-rose-500 font-sans">
+                Aggiungi una foto copertina per continuare.
+              </p>
             )}
           </div>
 

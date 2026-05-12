@@ -3,6 +3,7 @@ import { X, Plus } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Product, ProductCondition, ProductStatus } from '../types';
 import { CONDITIONS } from '../data/mockData';
+import ImageUploader from './ImageUploader';
 
 interface Props {
   initial?: Product;
@@ -29,7 +30,7 @@ export default function ProductForm({ initial, onClose }: Props) {
   const [brand, setBrand] = useState(initial?.brand ?? '');
   const [material, setMaterial] = useState(initial?.material ?? '');
   const [dimensions, setDimensions] = useState(initial?.dimensions ?? '');
-  const [imagesRaw, setImagesRaw] = useState((initial?.images ?? ['']).join('\n'));
+  const [images, setImages] = useState<string[]>(initial?.images ?? []);
   const [eventId, setEventId] = useState(initial?.eventId ?? '');
   const [tagsRaw, setTagsRaw] = useState((initial?.tags ?? []).join(', '));
   const [price, setPrice] = useState(initial?.price?.toString() ?? '');
@@ -39,7 +40,6 @@ export default function ProductForm({ initial, onClose }: Props) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const images = imagesRaw.split('\n').map(s => s.trim()).filter(Boolean);
     const tags = tagsRaw.split(',').map(s => s.trim()).filter(Boolean);
 
     if (!title || !description || images.length === 0 || !price) {
@@ -212,17 +212,21 @@ export default function ProductForm({ initial, onClose }: Props) {
           {/* Images */}
           <div>
             <label className="block text-xs font-medium text-bark-600 mb-1.5 font-sans uppercase tracking-wide">
-              URL immagini <span className="text-rose-500">*</span>
-              <span className="text-bark-400 normal-case ml-1 font-normal">(una per riga)</span>
+              Immagini <span className="text-rose-500">*</span>
+              <span className="text-bark-400 normal-case ml-1 font-normal">(fino a 5)</span>
             </label>
-            <textarea
-              value={imagesRaw}
-              onChange={e => setImagesRaw(e.target.value)}
-              rows={3}
-              className="input resize-none font-mono text-xs"
-              placeholder="https://images.unsplash.com/..."
-              required
+            <ImageUploader
+              folder="products"
+              userId={state.user!.id}
+              maxFiles={5}
+              value={images}
+              onChange={setImages}
             />
+            {images.length === 0 && (
+              <p className="mt-1.5 text-xs text-rose-500 font-sans">
+                Aggiungi almeno una foto per continuare.
+              </p>
+            )}
           </div>
 
           {/* Price & Original Price */}
