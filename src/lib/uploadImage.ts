@@ -69,11 +69,22 @@ export async function uploadImage(file: File, opts: UploadOptions): Promise<stri
   const slug = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const path = `${folder}/${userId}/${slug}.jpg`;
 
-  const { error } = await supabase.storage
+  // Race the upload against a 30-second timeout so it never hangs silently
+  const uploadPromise = supabase.storage
     .from(BUCKET)
     .upload(path, compressed, { contentType: 'image/jpeg', upsert: false });
 
-  if (error) throw error;
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('Upload timeout — controlla connessione e bucket Supabase')), 30_000),
+  );
+
+  const { error } = await Promise.race([uploadPromise, timeoutPromise]);
+
+  if (error) {
+    console.error('[uploadImage] Supabase Storage error:', error);
+    // Surface the real Supabase message so it shows in the UI
+    throw new Error((error as { message?: string }).message ?? String(error));
+  }
 
   onProgress?.(1);
 

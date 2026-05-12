@@ -63,10 +63,12 @@ export default function ImageUploader({
           });
           collected.push(url);
           setTasks(prev => prev.filter(t => t.id !== tid));
-        } catch {
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Upload fallito';
+          console.error('[ImageUploader] upload error:', err);
           setTasks(prev =>
             prev.map(t =>
-              t.id === tid ? { ...t, progress: 0, error: 'Upload fallito' } : t,
+              t.id === tid ? { ...t, progress: 0, error: msg } : t,
             ),
           );
         }
