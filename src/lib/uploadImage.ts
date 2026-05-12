@@ -69,21 +69,52 @@ export async function uploadImage(file: File, opts: UploadOptions): Promise<stri
   const slug = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const path = `${folder}/${userId}/${slug}.jpg`;
 
-  // Race the upload against a 30-second timeout so it never hangs silently
-  const uploadPromise = supabase.storage
-    .from(BUCKET)
-    .upload(path, compressed, { contentType: 'image/jpeg', upsert: false });
+  // Get current session token (refresh if expired)
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData?.session?.access_token;
 
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('Upload timeout — controlla connessione e bucket Supabase')), 30_000),
-  );
+  if (!accessToken) {
+    throw new Error('Sessione non trovata — effettua di nuovo il login');
+  }
 
-  const { error } = await Promise.race([uploadPromise, timeoutPromise]);
+  // Use a direct fetch instead of the supabase-js storage client
+  // to avoid the internal session-refresh hang that supabase-js can trigger
+  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+  const ANON_KEY    = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+  const uploadUrl   = `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`;
 
-  if (error) {
-    console.error('[uploadImage] Supabase Storage error:', error);
-    // Surface the real Supabase message so it shows in the UI
-    throw new Error((error as { message?: string }).message ?? String(error));
+  const controller  = new AbortController();
+  const timer       = setTimeout(() => controller.abort(), 30_000);
+
+  let response: Response;
+  try {
+    response = await fetch(uploadUrl, {
+      method:  'POST',
+      signal:  controller.signal,
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'apikey':        ANON_KEY,
+        'Content-Type':  'image/jpeg',
+        'x-upsert':      'false',
+      },
+      body: compressed,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if ((err as Error).name === 'AbortError') {
+      throw new Error('Upload timeout — connessione troppo lenta o bucket non raggiungibile');
+    }
+    throw err;
+  }
+  clearTimeout(timer);
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const msg  = (body as { message?: string; error?: string }).message
+              ?? (body as { message?: string; error?: string }).error
+              ?? `HTTP ${response.status}`;
+    console.error('[uploadImage] HTTP error:', response.status, body);
+    throw new Error(msg);
   }
 
   onProgress?.(1);
