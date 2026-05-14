@@ -463,8 +463,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'LOGIN', payload: tempUser });
         }
 
-        // Load the real profile from DB — this is the source of truth for role
-        const { data: profile } = await supabase
+        // Load the real profile from DB — this is the source of truth for role.
+        // Use supabasePublic (no session, no refresh-hang risk) — profiles
+        // have a `using (true)` SELECT policy so anon can always read them.
+        const { data: profile } = await supabasePublic
           .from('profiles')
           .select('*')
           .eq('id', su.id)
@@ -564,7 +566,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'LOGIN', payload: tempUser });
 
     // Load full profile in background (updates avatar, rating, etc.)
-    void supabase.from('profiles').select('*').eq('id', data.user.id).single()
+    // Use supabasePublic — profiles are publicly readable, no refresh risk.
+    void supabasePublic.from('profiles').select('*').eq('id', data.user.id).single()
       .then(({ data: profile }) => {
         if (profile) dispatch({ type: 'LOGIN', payload: rowToUser(profile as Record<string, unknown>) });
       });
