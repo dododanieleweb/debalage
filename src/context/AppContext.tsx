@@ -963,21 +963,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ── Admin ─────────────────────────────────────────────────────────────────
 
   /** Aggiorna una quota in app_settings.
-   *  Usa un fetch() diretto (come uploadImage) per evitare che supabase-js
-   *  metta la richiesta in coda dietro un refresh token che non si sblocca. */
+   *  Legge il token DIRETTAMENTE da localStorage (bypass totale del client
+   *  supabase-js, che usa un mutex interno e si blocca se un refresh è
+   *  in corso). Poi usa fetch() diretto, come uploadImage. */
   const upsertSetting = async (key: string, value: number): Promise<boolean> => {
     if (!HAS_SUPABASE) return true;
 
-    // getSession() legge da localStorage — non va in coda, è istantaneo
-    const { data: sd } = await supabase.auth.getSession();
-    const accessToken = sd?.session?.access_token;
-    if (!accessToken) {
-      notifyErr('Sessione scaduta — effettua di nuovo il login per salvare');
-      return false;
-    }
-
     const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
     const ANON_KEY     = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+
+    // Chiave usata da supabase-js v2 per salvare la sessione in localStorage
+    const projectRef  = new URL(SUPABASE_URL).hostname.split('.')[0];
+    const storageKey  = `sb-${projectRef}-auth-token`;
+
+    let accessToken: string | null = null;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { access_token?: string };
+        accessToken = parsed?.access_token ?? null;
+      }
+    } catch {
+      // localStorage non disponibile o JSON corrotto
+    }
+
+    if (!accessToken) {
+      notifyErr('Sessione non trovata — effettua di nuovo il login per salvare');
+      return false;
+    }
 
     let res: Response;
     try {
@@ -991,7 +1004,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         },
         body: JSON.stringify({ key, value: String(value) }),
       });
-    } catch (err) {
+    } catch {
       notifyErr('Errore di rete nel salvataggio');
       return false;
     }
