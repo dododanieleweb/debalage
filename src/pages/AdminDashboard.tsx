@@ -380,6 +380,72 @@ export default function AdminDashboard() {
           </div>
         </section>
 
+        {/* ── 6. Elementi in evidenza ────────────────────────────────────── */}
+        {state.featureFee > 0 && (() => {
+          const featEvents   = state.events.filter(e => e.featured);
+          const featProducts = state.products.filter(p => p.featured);
+          if (featEvents.length === 0 && featProducts.length === 0) return null;
+          return (
+            <section>
+              <h2 className="font-serif text-2xl text-bark-900 mb-5 flex items-center gap-2">
+                <Star size={22} className="text-vintage-600" fill="currentColor" /> Elementi in evidenza
+                <span className="font-sans text-sm text-bark-400 font-normal">
+                  ({featEvents.length + featProducts.length}) — quota: €{state.featureFee.toFixed(2)} cad.
+                </span>
+              </h2>
+              <div className="space-y-3">
+                {featEvents.map(ev => {
+                  const seller = state.users.find(u => u.id === ev.sellerId);
+                  return (
+                    <div key={ev.id} className="bg-white border border-cream-200 rounded-2xl px-5 py-4 flex items-center gap-4">
+                      {ev.image && (
+                        <img src={ev.image} alt="" className="w-12 h-12 rounded-xl object-cover shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-bark-900 font-sans truncate">{ev.title}</p>
+                        <p className="text-xs text-bark-400 font-sans">{ev.date} · {ev.city}</p>
+                      </div>
+                      <span className="text-xs bg-vintage-50 text-vintage-700 border border-vintage-200 px-2.5 py-1 rounded-full font-sans font-medium shrink-0">
+                        Evento
+                      </span>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-semibold text-bark-900 font-sans">€{state.featureFee.toFixed(2)}</p>
+                        <p className="text-xs text-bark-400 font-sans truncate max-w-[120px]">{seller?.name ?? '—'}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+                {featProducts.map(pr => {
+                  const seller = state.users.find(u => u.id === pr.sellerId);
+                  return (
+                    <div key={pr.id} className="bg-white border border-cream-200 rounded-2xl px-5 py-4 flex items-center gap-4">
+                      {pr.images[0] && (
+                        <img src={pr.images[0]} alt="" className="w-12 h-12 rounded-xl object-cover shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-bark-900 font-sans truncate">{pr.title}</p>
+                        <p className="text-xs text-bark-400 font-sans">{pr.category} · €{pr.price.toFixed(2)}</p>
+                      </div>
+                      <span className="text-xs bg-sky-50 text-sky-700 border border-sky-200 px-2.5 py-1 rounded-full font-sans font-medium shrink-0">
+                        Prodotto
+                      </span>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-semibold text-bark-900 font-sans">€{state.featureFee.toFixed(2)}</p>
+                        <p className="text-xs text-bark-400 font-sans truncate max-w-[120px]">{seller?.name ?? '—'}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="text-xs text-bark-400 font-sans text-right pt-1">
+                  Totale da riscuotere: <strong className="text-bark-700">
+                    €{((featEvents.length + featProducts.length) * state.featureFee).toFixed(2)}
+                  </strong>
+                </p>
+              </div>
+            </section>
+          );
+        })()}
+
         {/* ── Nota impostazione admin ─────────────────────────────────────── */}
         <section className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
           <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide font-sans mb-1">Come impostare un utente come Admin</p>

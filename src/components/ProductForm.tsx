@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Plus } from 'lucide-react';
+import { X, Plus, Star } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Product, ProductCondition, ProductStatus } from '../types';
 import { CONDITIONS } from '../data/mockData';
@@ -298,15 +298,33 @@ export default function ProductForm({ initial, onClose }: Props) {
           </div>
 
           {/* Featured */}
-          <label className="flex items-center gap-3 cursor-pointer select-none">
-            <div
-              onClick={() => setFeatured(!featured)}
-              className={`relative w-10 h-6 rounded-full transition-colors cursor-pointer ${featured ? 'bg-vintage-600' : 'bg-cream-300'}`}
-            >
-              <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${featured ? 'left-5' : 'left-1'}`} />
-            </div>
-            <span className="text-sm font-sans text-bark-700">In evidenza</span>
-          </label>
+          <div className="space-y-2">
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <div
+                onClick={() => setFeatured(!featured)}
+                className={`relative w-10 h-6 rounded-full transition-colors cursor-pointer ${featured ? 'bg-vintage-600' : 'bg-cream-300'}`}
+              >
+                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${featured ? 'left-5' : 'left-1'}`} />
+              </div>
+              <span className="text-sm font-sans text-bark-700">In evidenza</span>
+              {state.featureFee > 0 && (
+                <span className="ml-auto text-xs font-semibold font-sans text-vintage-600 bg-vintage-50 border border-vintage-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <Star size={11} />
+                  €{state.featureFee.toFixed(2)}
+                </span>
+              )}
+            </label>
+            {featured && state.featureFee > 0 && (
+              <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                <Star size={14} className="text-amber-500 shrink-0 mt-0.5" fill="currentColor" />
+                <p className="text-xs text-amber-800 font-sans leading-relaxed">
+                  La messa in evidenza ha un costo di{' '}
+                  <strong>€{state.featureFee.toFixed(2)}</strong>.{' '}
+                  Il gestore della piattaforma ti contatterà per il pagamento dopo la pubblicazione.
+                </p>
+              </div>
+            )}
+          </div>
 
           {/* Actions */}
           <div className="flex gap-3 pt-2 border-t border-cream-100">
