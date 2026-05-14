@@ -4,7 +4,7 @@ import {
 } from 'react';
 import { User, Product, CartItem, TimeSlot, Order, Event } from '../types';
 import { USERS, PRODUCTS, EVENTS, INITIAL_SLOTS, generateSlots } from '../data/mockData';
-import { supabase } from '../lib/supabase';
+import { supabase, supabasePublic } from '../lib/supabase';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 const HAS_SUPABASE =
@@ -352,17 +352,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         console.warn('Supabase loadData timeout — forcing loading:false');
         dispatch({ type: 'INIT_DATA', users: [], products: [], events: [], slots: {} });
       }
-    }, 3000);
+    }, 8000);
 
     // ── Phase 1: critical data (blocks the loading screen) ───────────────────
     // Only the data needed to render the home/list pages immediately.
     // Slots & bookings are deferred to Phase 2 so the app appears faster.
     const loadCritical = async () => {
       const [eventsRes, productsRes, profilesRes, settingsRes] = await Promise.all([
-        supabase.from('events').select('*').order('date', { ascending: true }),
-        supabase.from('products').select('*').order('created_at', { ascending: false }),
-        supabase.from('profiles').select('*'),
-        supabase.from('app_settings').select('key, value'),
+        supabasePublic.from('events').select('*').order('date', { ascending: true }),
+        supabasePublic.from('products').select('*').order('created_at', { ascending: false }),
+        supabasePublic.from('profiles').select('*'),
+        supabasePublic.from('app_settings').select('key, value'),
       ]);
 
       if (eventsRes.error)   console.error('load events:',   eventsRes.error.message);
@@ -386,8 +386,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // ── Phase 2: deferred data (slots + bookings, needed only on event detail) ─
     const loadDeferred = async () => {
       const [slotsRes, bookingsRes] = await Promise.all([
-        supabase.from('time_slots').select('*'),
-        supabase.from('bookings').select('id, slot_id, event_id, user_id, created_at'),
+        supabasePublic.from('time_slots').select('*'),
+        supabasePublic.from('bookings').select('id, slot_id, event_id, user_id, created_at'),
       ]);
 
       if (slotsRes.error)    console.error('load slots:',    slotsRes.error.message);
