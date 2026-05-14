@@ -5,18 +5,16 @@
 [build.environment]
   NODE_VERSION = "20"
 
-# HTML — always revalidate so new deploys are seen immediately
+# All routes: never cache (the redirect always serves index.html)
+# Browsers and Netlify CDN will always fetch fresh content
 [[headers]]
-  for = "/"
+  for = "/*"
   [headers.values]
-    Cache-Control = "public, max-age=0, must-revalidate"
-
-[[headers]]
-  for = "/*.html"
-  [headers.values]
-    Cache-Control = "public, max-age=0, must-revalidate"
+    Cache-Control = "no-store, no-cache, must-revalidate"
+    Pragma        = "no-cache"
 
 # JS/CSS chunks have content-hash filenames — safe to cache for 1 year
+# This rule is more specific and overrides the /* rule above for assets
 [[headers]]
   for = "/assets/*"
   [headers.values]
