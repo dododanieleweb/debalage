@@ -331,9 +331,9 @@ interface ContextValue {
   toggleSlotDisabled: (eventId: string, slotId: string) => void;
   initEventSlots:     (eventId: string, timeStart: string, timeEnd: string, capacity: number) => void;
   getUserBookedSlot:  (eventId: string) => TimeSlot | null;
-  // Admin
-  updateEventFee:   (fee: number) => Promise<void>;
-  updateFeatureFee: (fee: number) => Promise<void>;
+  // Admin — restituiscono true se il salvataggio è andato a buon fine
+  updateEventFee:   (fee: number) => Promise<boolean>;
+  updateFeatureFee: (fee: number) => Promise<boolean>;
   // Computed
   cartCount: number;
   cartTotal: number;
@@ -962,50 +962,61 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // ── Admin ─────────────────────────────────────────────────────────────────
 
-  /** Aggiorna una quota in app_settings. Usa la sessione corrente; se la
-   *  sessione è scaduta avvisa l'utente invece di fallire in silenzio. */
+  /** Aggiorna una quota in app_settings.
+   *  Usa un fetch() diretto (come uploadImage) per evitare che supabase-js
+   *  metta la richiesta in coda dietro un refresh token che non si sblocca. */
   const upsertSetting = async (key: string, value: number): Promise<boolean> => {
     if (!HAS_SUPABASE) return true;
 
-    // Verifica sessione attiva prima di scrivere
+    // getSession() legge da localStorage — non va in coda, è istantaneo
     const { data: sd } = await supabase.auth.getSession();
-    if (!sd?.session) {
+    const accessToken = sd?.session?.access_token;
+    if (!accessToken) {
       notifyErr('Sessione scaduta — effettua di nuovo il login per salvare');
       return false;
     }
 
-    const { error } = await supabase
-      .from('app_settings')
-      .upsert({ key, value: String(value) }, { onConflict: 'key' });
+    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+    const ANON_KEY     = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-    if (error) {
-      console.error(`upsertSetting(${key}):`, error);
-      notifyErr(`Errore nel salvataggio: ${error.message}`);
+    let res: Response;
+    try {
+      res = await fetch(`${SUPABASE_URL}/rest/v1/app_settings`, {
+        method:  'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey':        ANON_KEY,
+          'Content-Type':  'application/json',
+          'Prefer':        'resolution=merge-duplicates,return=minimal',
+        },
+        body: JSON.stringify({ key, value: String(value) }),
+      });
+    } catch (err) {
+      notifyErr('Errore di rete nel salvataggio');
       return false;
     }
 
-    // Verifica che il valore sia stato effettivamente scritto
-    const { data: check } = await supabasePublic
-      .from('app_settings')
-      .select('value')
-      .eq('key', key)
-      .single();
-
-    if (!check || check.value !== String(value)) {
-      notifyErr('Salvataggio bloccato — ricarica la pagina e riprova');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const msg  = (body as { message?: string; error?: string }).message
+                ?? (body as { message?: string; error?: string }).error
+                ?? `HTTP ${res.status}`;
+      console.error(`upsertSetting(${key}):`, msg);
+      notifyErr(`Errore nel salvataggio: ${msg}`);
       return false;
     }
+
     return true;
   };
 
-  const updateEventFee = async (fee: number): Promise<void> => {
+  const updateEventFee = async (fee: number): Promise<boolean> => {
     dispatch({ type: 'SET_EVENT_FEE', fee });
-    await upsertSetting('event_fee', fee);
+    return upsertSetting('event_fee', fee);
   };
 
-  const updateFeatureFee = async (fee: number): Promise<void> => {
+  const updateFeatureFee = async (fee: number): Promise<boolean> => {
     dispatch({ type: 'SET_FEATURE_FEE', fee });
-    await upsertSetting('feature_fee', fee);
+    return upsertSetting('feature_fee', fee);
   };
 
   const getUserBookedSlot = (eventId: string): TimeSlot | null => {

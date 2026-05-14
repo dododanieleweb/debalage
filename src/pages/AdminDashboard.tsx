@@ -53,8 +53,8 @@ export default function AdminDashboard() {
     const parsed = parseFloat(feeInput.replace(',', '.'));
     if (isNaN(parsed) || parsed < 0) return;
     setFeeSaving(true);
-    await updateEventFee(parsed);
-    notify('Quota evento aggiornata', 'success');
+    const ok = await updateEventFee(parsed);
+    if (ok) notify('Quota evento aggiornata', 'success');
     setFeeSaving(false);
   };
 
@@ -65,8 +65,8 @@ export default function AdminDashboard() {
     const parsed = parseFloat(featFeeInput.replace(',', '.'));
     if (isNaN(parsed) || parsed < 0) return;
     setFeatFeeSaving(true);
-    await updateFeatureFee(parsed);
-    notify('Quota evidenza aggiornata', 'success');
+    const ok = await updateFeatureFee(parsed);
+    if (ok) notify('Quota evidenza aggiornata', 'success');
     setFeatFeeSaving(false);
   };
 
