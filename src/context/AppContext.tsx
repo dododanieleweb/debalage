@@ -961,28 +961,51 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   // ── Admin ─────────────────────────────────────────────────────────────────
-  const updateEventFee = async (fee: number): Promise<void> => {
-    dispatch({ type: 'SET_EVENT_FEE', fee });
-    if (!HAS_SUPABASE) return;
+
+  /** Aggiorna una quota in app_settings. Usa la sessione corrente; se la
+   *  sessione è scaduta avvisa l'utente invece di fallire in silenzio. */
+  const upsertSetting = async (key: string, value: number): Promise<boolean> => {
+    if (!HAS_SUPABASE) return true;
+
+    // Verifica sessione attiva prima di scrivere
+    const { data: sd } = await supabase.auth.getSession();
+    if (!sd?.session) {
+      notifyErr('Sessione scaduta — effettua di nuovo il login per salvare');
+      return false;
+    }
+
     const { error } = await supabase
       .from('app_settings')
-      .upsert({ key: 'event_fee', value: String(fee) }, { onConflict: 'key' });
+      .upsert({ key, value: String(value) }, { onConflict: 'key' });
+
     if (error) {
-      console.error('updateEventFee:', error);
-      notifyErr(`Errore nel salvataggio della quota: ${error.message}`);
+      console.error(`upsertSetting(${key}):`, error);
+      notifyErr(`Errore nel salvataggio: ${error.message}`);
+      return false;
     }
+
+    // Verifica che il valore sia stato effettivamente scritto
+    const { data: check } = await supabasePublic
+      .from('app_settings')
+      .select('value')
+      .eq('key', key)
+      .single();
+
+    if (!check || check.value !== String(value)) {
+      notifyErr('Salvataggio bloccato — ricarica la pagina e riprova');
+      return false;
+    }
+    return true;
+  };
+
+  const updateEventFee = async (fee: number): Promise<void> => {
+    dispatch({ type: 'SET_EVENT_FEE', fee });
+    await upsertSetting('event_fee', fee);
   };
 
   const updateFeatureFee = async (fee: number): Promise<void> => {
     dispatch({ type: 'SET_FEATURE_FEE', fee });
-    if (!HAS_SUPABASE) return;
-    const { error } = await supabase
-      .from('app_settings')
-      .upsert({ key: 'feature_fee', value: String(fee) }, { onConflict: 'key' });
-    if (error) {
-      console.error('updateFeatureFee:', error);
-      notifyErr(`Errore nel salvataggio della quota: ${error.message}`);
-    }
+    await upsertSetting('feature_fee', fee);
   };
 
   const getUserBookedSlot = (eventId: string): TimeSlot | null => {
