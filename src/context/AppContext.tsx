@@ -109,6 +109,7 @@ interface State {
   loading:      boolean;
   authLoading:  boolean;  // true finché il profilo DB non è caricato dopo onAuthStateChange
   eventFee:     number;   // quota che il venditore paga per pubblicare un evento
+  featureFee:   number;   // quota per mettere in evidenza un evento o un prodotto
 }
 
 type Action =
@@ -148,7 +149,8 @@ type Action =
   | { type: 'SET_SLOT_CAPACITY';   eventId: string; slotId: string; capacity: number }
   | { type: 'TOGGLE_SLOT_DISABLED';eventId: string; slotId: string }
   | { type: 'INIT_EVENT_SLOTS';    eventId: string; timeStart: string; timeEnd: string; capacity: number }
-  | { type: 'SET_EVENT_FEE'; fee: number }
+  | { type: 'SET_EVENT_FEE';   fee: number }
+  | { type: 'SET_FEATURE_FEE'; fee: number }
   | { type: 'SET_AUTH_LOADING'; value: boolean };
 
 const initialState: State = {
@@ -166,6 +168,7 @@ const initialState: State = {
   loading:      HAS_SUPABASE,
   authLoading:  HAS_SUPABASE,  // aspetta fino al primo onAuthStateChange
   eventFee:     0,
+  featureFee:   0,
 };
 
 function reducer(state: State, action: Action): State {
@@ -186,6 +189,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, users: action.users, products: action.products, events: action.events, slots: action.slots, loading: false };
     case 'SET_EVENT_FEE':
       return { ...state, eventFee: action.fee };
+    case 'SET_FEATURE_FEE':
+      return { ...state, featureFee: action.fee };
     case 'SET_AUTH_LOADING':
       return { ...state, authLoading: action.value };
     case 'SET_WISHLIST': return { ...state, wishlist: action.ids };
@@ -327,7 +332,8 @@ interface ContextValue {
   initEventSlots:     (eventId: string, timeStart: string, timeEnd: string, capacity: number) => void;
   getUserBookedSlot:  (eventId: string) => TimeSlot | null;
   // Admin
-  updateEventFee: (fee: number) => Promise<void>;
+  updateEventFee:   (fee: number) => Promise<void>;
+  updateFeatureFee: (fee: number) => Promise<void>;
   // Computed
   cartCount: number;
   cartTotal: number;
@@ -374,9 +380,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const products = (productsRes.data ?? []).map(rowToProduct);
       const users    = (profilesRes.data ?? []).map(rowToUser);
 
-      // App settings (event fee, etc.)
-      const feeRow = (settingsRes.data ?? []).find((r: Record<string, unknown>) => r.key === 'event_fee');
-      if (feeRow) dispatch({ type: 'SET_EVENT_FEE', fee: Number(feeRow.value) });
+      // App settings (event fee, feature fee, etc.)
+      const rows = settingsRes.data ?? [];
+      const feeRow     = (rows as Record<string, unknown>[]).find(r => r.key === 'event_fee');
+      const featFeeRow = (rows as Record<string, unknown>[]).find(r => r.key === 'feature_fee');
+      if (feeRow)     dispatch({ type: 'SET_EVENT_FEE',   fee: Number(feeRow.value) });
+      if (featFeeRow) dispatch({ type: 'SET_FEATURE_FEE', fee: Number(featFeeRow.value) });
 
       // Unlock the UI immediately with empty slots — Phase 2 fills them in
       dispatch({ type: 'INIT_DATA', users, products, events, slots: {} });
@@ -964,6 +973,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateFeatureFee = async (fee: number): Promise<void> => {
+    dispatch({ type: 'SET_FEATURE_FEE', fee });
+    if (!HAS_SUPABASE) return;
+    const { error } = await supabase
+      .from('app_settings')
+      .upsert({ key: 'feature_fee', value: String(fee) }, { onConflict: 'key' });
+    if (error) {
+      console.error('updateFeatureFee:', error);
+      notifyErr(`Errore nel salvataggio della quota: ${error.message}`);
+    }
+  };
+
   const getUserBookedSlot = (eventId: string): TimeSlot | null => {
     if (!state.user) return null;
     return state.slots[eventId]?.find(s => s.bookings.some(b => b.userId === state.user!.id)) ?? null;
@@ -977,7 +998,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addToCart, removeFromCart, updateQuantity, clearCart,
       placeOrder, toggleWishlist, notify, cartCount, cartTotal,
       bookSlot, cancelBooking, setSlotCapacity, toggleSlotDisabled,
-      initEventSlots, getUserBookedSlot, updateEventFee,
+      initEventSlots, getUserBookedSlot, updateEventFee, updateFeatureFee,
     }}>
       {children}
     </AppContext.Provider>

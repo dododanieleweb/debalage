@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
   Users, ShoppingBag, Store, Euro, Save, TrendingUp,
-  Calendar, CheckCircle2, Clock, XCircle, Shield, Search, ChevronUp, ChevronDown,
+  Calendar, CheckCircle2, Clock, XCircle, Shield, Search, ChevronUp, ChevronDown, Star,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -24,7 +24,7 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 export default function AdminDashboard() {
-  const { state, updateEventFee, notify } = useApp();
+  const { state, updateEventFee, updateFeatureFee, notify } = useApp();
 
   // Guard: wait for both data loading AND auth/profile loading to complete
   // before evaluating the role. Without this, a stale tempUser with the
@@ -56,6 +56,18 @@ export default function AdminDashboard() {
     await updateEventFee(parsed);
     notify('Quota evento aggiornata', 'success');
     setFeeSaving(false);
+  };
+
+  const [featFeeInput, setFeatFeeInput]   = useState<string>(String(state.featureFee));
+  const [featFeeSaving, setFeatFeeSaving] = useState(false);
+
+  const handleSaveFeatureFee = async () => {
+    const parsed = parseFloat(featFeeInput.replace(',', '.'));
+    if (isNaN(parsed) || parsed < 0) return;
+    setFeatFeeSaving(true);
+    await updateFeatureFee(parsed);
+    notify('Quota evidenza aggiornata', 'success');
+    setFeatFeeSaving(false);
   };
 
   // ── User stats ──────────────────────────────────────────────────────────────
@@ -163,7 +175,47 @@ export default function AdminDashboard() {
           </div>
         </section>
 
-        {/* ── 2. Stats utenti ─────────────────────────────────────────────── */}
+        {/* ── 2. Quota messa in evidenza ──────────────────────────────────── */}
+        <section>
+          <h2 className="font-serif text-2xl text-bark-900 mb-5 flex items-center gap-2">
+            <Star size={22} className="text-vintage-600" /> Quota messa in evidenza
+          </h2>
+          <div className="bg-white rounded-3xl border border-cream-200 p-6 sm:p-8 flex flex-col sm:flex-row sm:items-end gap-6">
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-bark-600 font-sans mb-1.5 uppercase tracking-wide">
+                Importo quota (€) — pagato dal venditore per mettere in evidenza un evento o un prodotto
+              </label>
+              <div className="relative max-w-xs">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-bark-400 font-serif text-lg">€</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={featFeeInput}
+                  onChange={e => setFeatFeeInput(e.target.value)}
+                  className="input pl-8 text-lg font-serif max-w-xs"
+                  placeholder="0.00"
+                />
+              </div>
+              <p className="text-xs text-bark-400 font-sans mt-2">
+                Quota corrente salvata: <strong className="text-bark-700">€{state.featureFee.toFixed(2)}</strong>
+                {state.featureFee === 0 && <span className="ml-2 text-amber-600">• Gratuito al momento</span>}
+              </p>
+            </div>
+            <button
+              onClick={handleSaveFeatureFee}
+              disabled={featFeeSaving}
+              className="btn-primary gap-2 disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              {featFeeSaving
+                ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Salvataggio…</>
+                : <><Save size={16} />Salva quota</>
+              }
+            </button>
+          </div>
+        </section>
+
+        {/* ── 3. Stats utenti ─────────────────────────────────────────────── */}
         <section>
           <h2 className="font-serif text-2xl text-bark-900 mb-5 flex items-center gap-2">
             <Users size={22} className="text-vintage-600" /> Utenti registrati
@@ -190,7 +242,7 @@ export default function AdminDashboard() {
           )}
         </section>
 
-        {/* ── 3. Stats eventi ─────────────────────────────────────────────── */}
+        {/* ── 4. Stats eventi ─────────────────────────────────────────────── */}
         <section>
           <h2 className="font-serif text-2xl text-bark-900 mb-5 flex items-center gap-2">
             <Calendar size={22} className="text-vintage-600" /> Panoramica eventi
@@ -210,7 +262,7 @@ export default function AdminDashboard() {
           </div>
         </section>
 
-        {/* ── 4. Lista utenti ─────────────────────────────────────────────── */}
+        {/* ── 5. Lista utenti ─────────────────────────────────────────────── */}
         <section>
           <h2 className="font-serif text-2xl text-bark-900 mb-5 flex items-center gap-2">
             <Users size={22} className="text-vintage-600" /> Tutti gli utenti
