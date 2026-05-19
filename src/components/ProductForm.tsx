@@ -91,7 +91,7 @@ export default function ProductForm({ initial, onClose }: Props) {
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-8 py-6 border-b border-cream-200">
+        <div className="flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6 border-b border-cream-200">
           <h2 className="font-serif text-2xl text-bark-900">
             {isEdit ? 'Modifica prodotto' : 'Aggiungi prodotto'}
           </h2>
@@ -103,7 +103,7 @@ export default function ProductForm({ initial, onClose }: Props) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="px-8 py-6 space-y-5">
+        <form onSubmit={handleSubmit} className="px-4 sm:px-8 py-6 space-y-5">
           {/* Title */}
           <div>
             <label className="block text-xs font-medium text-bark-600 mb-1.5 font-sans uppercase tracking-wide">
@@ -135,7 +135,7 @@ export default function ProductForm({ initial, onClose }: Props) {
           </div>
 
           {/* Category & Subcategory */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-bark-600 mb-1.5 font-sans uppercase tracking-wide">Categoria</label>
               <select value={category} onChange={e => setCategory(e.target.value)} className="input">
@@ -155,7 +155,7 @@ export default function ProductForm({ initial, onClose }: Props) {
           </div>
 
           {/* Condition & Era */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-bark-600 mb-1.5 font-sans uppercase tracking-wide">Condizione</label>
               <select value={condition} onChange={e => setCondition(e.target.value as ProductCondition)} className="input">
@@ -174,7 +174,7 @@ export default function ProductForm({ initial, onClose }: Props) {
           </div>
 
           {/* Brand & Material */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-bark-600 mb-1.5 font-sans uppercase tracking-wide">Marca / Brand</label>
               <input
@@ -230,7 +230,7 @@ export default function ProductForm({ initial, onClose }: Props) {
           </div>
 
           {/* Price & Original Price */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-bark-600 mb-1.5 font-sans uppercase tracking-wide">
                 Prezzo (€) <span className="text-rose-500">*</span>
@@ -261,7 +261,7 @@ export default function ProductForm({ initial, onClose }: Props) {
           </div>
 
           {/* Status & Event */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-bark-600 mb-1.5 font-sans uppercase tracking-wide">Stato</label>
               <select value={status} onChange={e => setStatus(e.target.value as ProductStatus)} className="input">

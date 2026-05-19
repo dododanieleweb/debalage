@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { X, Plus, Star } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Event, EventType, EventStatus } from '../types';
@@ -12,6 +13,7 @@ interface Props {
 
 export default function EventForm({ initial, onClose }: Props) {
   const { state, addEvent, updateEvent, initEventSlots, notify } = useApp();
+  const navigate = useNavigate();
   const isEdit = !!initial;
 
   const [type, setType] = useState<EventType>(initial?.type ?? 'casa_privata');
@@ -66,14 +68,21 @@ export default function EventForm({ initial, onClose }: Props) {
     if (isEdit) {
       updateEvent(event);
       notify('Evento aggiornato!', 'success');
+      onClose();
     } else {
       addEvent(event);
       if (type === 'casa_privata') {
         initEventSlots(event.id, timeStart, timeEnd, parseInt(slotMaxCapacity) || 4);
       }
       notify('Evento creato!', 'success');
+      onClose();
+      // If there are fees (event publish fee or feature fee), redirect to checkout
+      const hasEventFee    = state.eventFee > 0;
+      const hasFeatureFee  = featured && state.featureFee > 0;
+      if (hasEventFee || hasFeatureFee) {
+        navigate('/checkout-quote');
+      }
     }
-    onClose();
   };
 
   return (
@@ -86,7 +95,7 @@ export default function EventForm({ initial, onClose }: Props) {
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-8 py-6 border-b border-cream-200">
+        <div className="flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6 border-b border-cream-200">
           <h2 className="font-serif text-2xl text-bark-900">
             {isEdit ? 'Modifica evento' : 'Crea evento'}
           </h2>
@@ -98,7 +107,7 @@ export default function EventForm({ initial, onClose }: Props) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="px-8 py-6 space-y-5">
+        <form onSubmit={handleSubmit} className="px-4 sm:px-8 py-6 space-y-5">
           {/* Type selector */}
           <div>
             <label className="block text-xs font-medium text-bark-600 mb-2 font-sans uppercase tracking-wide">Tipo evento</label>
@@ -152,7 +161,7 @@ export default function EventForm({ initial, onClose }: Props) {
           </div>
 
           {/* Address & City */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-bark-600 mb-1.5 font-sans uppercase tracking-wide">
                 Indirizzo <span className="text-rose-500">*</span>
@@ -182,7 +191,7 @@ export default function EventForm({ initial, onClose }: Props) {
           </div>
 
           {/* Dates */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-bark-600 mb-1.5 font-sans uppercase tracking-wide">
                 Data inizio <span className="text-rose-500">*</span>
@@ -207,7 +216,7 @@ export default function EventForm({ initial, onClose }: Props) {
           </div>
 
           {/* Times */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-bark-600 mb-1.5 font-sans uppercase tracking-wide">Ora inizio</label>
               <input type="time" value={timeStart} onChange={e => setTimeStart(e.target.value)} className="input" />
@@ -222,7 +231,7 @@ export default function EventForm({ initial, onClose }: Props) {
           {type === 'casa_privata' && (
             <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 space-y-3">
               <p className="text-sm font-medium text-rose-800 font-sans">🏠 Configurazione slot — Casa Privata</p>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-bark-600 mb-1.5 font-sans">Max persone per slot (30 min)</label>
                   <input
@@ -288,7 +297,7 @@ export default function EventForm({ initial, onClose }: Props) {
           </div>
 
           {/* Status & Price */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-bark-600 mb-1.5 font-sans uppercase tracking-wide">Stato</label>
               <select value={status} onChange={e => setStatus(e.target.value as EventStatus)} className="input">

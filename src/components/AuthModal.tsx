@@ -14,6 +14,8 @@ export default function AuthModal() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [loginAttempts, setLoginAttempts] = useState(0);
+  const [lockedUntil, setLockedUntil] = useState<number>(0);
 
   const isLogin = state.authMode === 'login';
 
@@ -30,15 +32,28 @@ export default function AuthModal() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // Rate limiting lato client: blocco dopo 5 tentativi falliti per 2 minuti
+    if (isLogin && Date.now() < lockedUntil) {
+      const remaining = Math.ceil((lockedUntil - Date.now()) / 1000);
+      setError(`Troppi tentativi. Riprova tra ${remaining} secondi.`);
+      return;
+    }
+
     setSubmitting(true);
 
     try {
       if (isLogin) {
         const err = await login(email, password);
         if (err) {
-          // Translate common Supabase error messages to Italian
-          if (err.toLowerCase().includes('invalid login') || err.toLowerCase().includes('invalid credentials')) {
-            setError('Email o password non corretti.');
+          const newAttempts = loginAttempts + 1;
+          setLoginAttempts(newAttempts);
+          if (newAttempts >= 5) {
+            setLockedUntil(Date.now() + 2 * 60 * 1000); // 2 minuti
+            setLoginAttempts(0);
+            setError('Troppi tentativi falliti. Account bloccato per 2 minuti.');
+          } else if (err.toLowerCase().includes('invalid login') || err.toLowerCase().includes('invalid credentials')) {
+            setError(`Email o password non corretti. (${5 - newAttempts} tentativi rimasti)`);
           } else if (err.toLowerCase().includes('email not confirmed')) {
             setError('Email non confermata. Controlla la tua casella di posta.');
           } else if (err.toLowerCase().includes('too many requests')) {
@@ -47,6 +62,7 @@ export default function AuthModal() {
             setError(err);
           }
         } else {
+          setLoginAttempts(0);
           notify('Bentornato!');
           closeAuth();
           resetForm();
@@ -56,8 +72,12 @@ export default function AuthModal() {
           setError('Compila tutti i campi richiesti.');
           return;
         }
-        if (password.length < 6) {
-          setError('La password deve essere di almeno 6 caratteri.');
+        if (password.length < 8) {
+          setError('La password deve essere di almeno 8 caratteri.');
+          return;
+        }
+        if (!/[0-9!@#$%^&*]/.test(password)) {
+          setError('La password deve contenere almeno un numero o un carattere speciale (!@#$%^&*).');
           return;
         }
         const err = await register(name.trim(), email, password, city.trim(), role);
@@ -153,7 +173,7 @@ export default function AuthModal() {
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder={isLogin ? '••••••••' : 'Min. 8 caratteri con numero o simbolo'}
                   className="input pr-10"
                   required
                 />

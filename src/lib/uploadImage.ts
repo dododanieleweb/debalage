@@ -69,9 +69,26 @@ export async function uploadImage(file: File, opts: UploadOptions): Promise<stri
   const slug = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const path = `${folder}/${userId}/${slug}.jpg`;
 
-  // Get current session token (refresh if expired)
-  const { data: sessionData } = await supabase.auth.getSession();
-  const accessToken = sessionData?.session?.access_token;
+  // Read token directly from localStorage to avoid the supabase-js internal
+  // mutex that can hang indefinitely on desktop Chrome/Firefox.
+  const SUPABASE_URL_ENV = import.meta.env.VITE_SUPABASE_URL as string;
+  let accessToken: string | undefined;
+  try {
+    const projectRef = new URL(SUPABASE_URL_ENV).hostname.split('.')[0];
+    const raw = localStorage.getItem(`sb-${projectRef}-auth-token`);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { access_token?: string };
+      accessToken = parsed.access_token;
+    }
+  } catch {
+    // localStorage not accessible — fall through to getSession()
+  }
+
+  // Fallback: if localStorage read failed, try the supabase client (slower on PC)
+  if (!accessToken) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    accessToken = sessionData?.session?.access_token;
+  }
 
   if (!accessToken) {
     throw new Error('Sessione non trovata — effettua di nuovo il login');

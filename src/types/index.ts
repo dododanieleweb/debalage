@@ -108,7 +108,9 @@ export interface CartItem {
   quantity: number;
 }
 
-export type OrderStatus = 'confermato' | 'spedito' | 'consegnato' | 'annullato';
+export type OrderStatus    = 'confermato' | 'spedito' | 'consegnato' | 'annullato';
+export type FeeType        = 'event_publish' | 'feature_event' | 'feature_product';
+export type FeeStatus      = 'pending' | 'paid' | 'waived';
 
 export interface Order {
   id: string;
@@ -121,4 +123,25 @@ export interface Order {
   address: string;
   city: string;
   createdAt: string;
+}
+
+export interface FeeCartItem {
+  id: string;
+  type: FeeType;
+  referenceId: string;
+  referenceTitle: string;
+  amount: number;
+}
+
+export interface PendingFee {
+  id: string;
+  type: FeeType;
+  sellerId: string;
+  sellerName?: string;
+  referenceId: string;
+  referenceTitle: string;
+  amount: number;
+  status: FeeStatus;
+  createdAt: string;
+  paidAt?: string;
 }

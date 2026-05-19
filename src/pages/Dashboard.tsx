@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom';
 import {
   Plus, Package, Calendar, TrendingUp, Eye, Heart, Edit2, Trash2,
   Star, Users, Clock, Settings, ChevronDown, ChevronUp, Save,
-  ShoppingBag,
+  ShoppingBag, Banknote, CheckCircle2, XCircle, AlertCircle, RefreshCw,
 } from 'lucide-react';
+import { PendingFee } from '../types';
 import EventCalendar from '../components/EventCalendar';
 import ProductForm from '../components/ProductForm';
 import EventForm from '../components/EventForm';
@@ -204,10 +205,11 @@ function AppointmentsPanel({ event }: { event: Event }) {
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const { state, openAuth, notify, deleteProduct, deleteEvent } = useApp();
+  const { state, openAuth, notify, deleteProduct, deleteEvent, refreshFees } = useApp();
   const { user } = state;
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'events' | 'appointments' | 'orders'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'events' | 'appointments' | 'orders' | 'fees'>('overview');
+  const [feesRefreshing, setFeesRefreshing] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   // Form modals
@@ -272,12 +274,16 @@ export default function Dashboard() {
     { icon: <Star     size={20} className="text-emerald-600" />, label: 'Valutazione',       value: user.rating,    bg: 'bg-emerald-50' },
   ];
 
+  const myFees = state.pendingFees.filter(f => f.sellerId === user.id);
+  const pendingFeesCount = myFees.filter(f => f.status === 'pending').length;
+
   const tabs = [
     { key: 'overview',      label: 'Panoramica' },
     { key: 'products',      label: `Prodotti (${myProducts.length})` },
     { key: 'events',        label: `Eventi (${myEvents.length})` },
     { key: 'appointments',  label: `Appuntamenti${totalBookings > 0 ? ` (${totalBookings})` : ''}` },
     { key: 'orders',        label: `Ordini${myOrders.length > 0 ? ` (${myOrders.length})` : ''}` },
+    { key: 'fees',          label: `Quote${pendingFeesCount > 0 ? ` (${pendingFeesCount})` : ''}` },
   ] as const;
 
   const appointmentEvent = selectedEventId
@@ -377,12 +383,16 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="card overflow-hidden">
+                <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="bg-cream-50 border-b border-cream-200">
-                      {['Prodotto', 'Categoria', 'Prezzo', 'Stato', 'Viste', 'Azioni'].map(h => (
-                        <th key={h} className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide">{h}</th>
-                      ))}
+                      <th className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide">Prodotto</th>
+                      <th className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide hidden sm:table-cell">Categoria</th>
+                      <th className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide">Prezzo</th>
+                      <th className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide">Stato</th>
+                      <th className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide hidden sm:table-cell">Viste</th>
+                      <th className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide">Azioni</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -390,18 +400,18 @@ export default function Dashboard() {
                       <tr key={p.id} className={`border-b border-cream-100 ${i % 2 === 0 ? '' : 'bg-cream-50/50'}`}>
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-3">
-                            <img src={p.images[0]} alt={p.title} className="w-10 h-10 rounded-lg object-cover" />
-                            <Link to={`/prodotto/${p.id}`} className="text-sm font-medium text-bark-900 hover:text-vintage-700 line-clamp-1 max-w-[180px]">{p.title}</Link>
+                            <img src={p.images[0]} alt={p.title} className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                            <Link to={`/prodotto/${p.id}`} className="text-sm font-medium text-bark-900 hover:text-vintage-700 line-clamp-2 max-w-[140px] sm:max-w-[180px]">{p.title}</Link>
                           </div>
                         </td>
-                        <td className="px-5 py-4 text-sm text-bark-500 font-sans">{p.category}</td>
-                        <td className="px-5 py-4 font-serif text-bark-900">€{p.price.toLocaleString('it-IT')}</td>
+                        <td className="px-5 py-4 text-sm text-bark-500 font-sans hidden sm:table-cell">{p.category}</td>
+                        <td className="px-5 py-4 font-serif text-bark-900 whitespace-nowrap">€{p.price.toLocaleString('it-IT')}</td>
                         <td className="px-5 py-4">
                           <span className={`badge ${p.status === 'available' ? 'bg-emerald-50 text-emerald-700' : p.status === 'reserved' ? 'bg-amber-50 text-amber-700' : 'bg-bark-100 text-bark-600'}`}>
-                            {p.status === 'available' ? 'Disponibile' : p.status === 'reserved' ? 'Riservato' : 'Venduto'}
+                            {p.status === 'available' ? 'Disp.' : p.status === 'reserved' ? 'Ris.' : 'Vend.'}
                           </span>
                         </td>
-                        <td className="px-5 py-4 text-sm text-bark-500 font-sans">{p.views}</td>
+                        <td className="px-5 py-4 text-sm text-bark-500 font-sans hidden sm:table-cell">{p.views}</td>
                         <td className="px-5 py-4">
                           <div className="flex gap-2">
                             <button onClick={() => openEditProduct(p)} className="p-1.5 text-bark-400 hover:text-bark-700 hover:bg-cream-100 rounded-lg transition-colors"><Edit2 size={14} /></button>
@@ -412,6 +422,7 @@ export default function Dashboard() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             )}
           </div>
@@ -459,12 +470,17 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="card overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="bg-cream-50 border-b border-cream-200">
-                    {['Prodotto', 'Categoria', 'Condizione', 'Prezzo', 'Stato', 'Viste/Salv.', 'Azioni'].map(h => (
-                      <th key={h} className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide">{h}</th>
-                    ))}
+                    <th className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide">Prodotto</th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide hidden md:table-cell">Categoria</th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide hidden lg:table-cell">Condizione</th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide">Prezzo</th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide">Stato</th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide hidden sm:table-cell">Viste/Salv.</th>
+                    <th className="text-left px-5 py-3 text-xs font-medium text-bark-500 font-sans uppercase tracking-wide">Azioni</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -472,19 +488,19 @@ export default function Dashboard() {
                     <tr key={p.id} className={`border-b border-cream-100 ${i % 2 === 0 ? '' : 'bg-cream-50/40'}`}>
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3">
-                          <img src={p.images[0]} alt={p.title} className="w-12 h-12 rounded-xl object-cover shrink-0" />
-                          <Link to={`/prodotto/${p.id}`} className="text-sm font-medium text-bark-900 hover:text-vintage-700 line-clamp-2 max-w-[200px]">{p.title}</Link>
+                          <img src={p.images[0]} alt={p.title} className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl object-cover shrink-0" />
+                          <Link to={`/prodotto/${p.id}`} className="text-sm font-medium text-bark-900 hover:text-vintage-700 line-clamp-2 max-w-[130px] sm:max-w-[200px]">{p.title}</Link>
                         </div>
                       </td>
-                      <td className="px-5 py-4 text-sm text-bark-500 font-sans whitespace-nowrap">{p.category}</td>
-                      <td className="px-5 py-4"><span className="badge bg-cream-100 text-bark-600 text-xs">{p.condition.replace('_', ' ')}</span></td>
+                      <td className="px-5 py-4 text-sm text-bark-500 font-sans whitespace-nowrap hidden md:table-cell">{p.category}</td>
+                      <td className="px-5 py-4 hidden lg:table-cell"><span className="badge bg-cream-100 text-bark-600 text-xs">{p.condition.replace('_', ' ')}</span></td>
                       <td className="px-5 py-4 font-serif text-bark-900 whitespace-nowrap">€{p.price.toLocaleString('it-IT')}</td>
                       <td className="px-5 py-4">
                         <span className={`badge ${p.status === 'available' ? 'bg-emerald-50 text-emerald-700' : p.status === 'reserved' ? 'bg-amber-50 text-amber-700' : 'bg-bark-100 text-bark-600'}`}>
-                          {p.status === 'available' ? 'Disponibile' : p.status === 'reserved' ? 'Riservato' : 'Venduto'}
+                          {p.status === 'available' ? 'Disp.' : p.status === 'reserved' ? 'Ris.' : 'Vend.'}
                         </span>
                       </td>
-                      <td className="px-5 py-4 text-sm text-bark-500 font-sans whitespace-nowrap">{p.views} / {p.saves}</td>
+                      <td className="px-5 py-4 text-sm text-bark-500 font-sans whitespace-nowrap hidden sm:table-cell">{p.views} / {p.saves}</td>
                       <td className="px-5 py-4">
                         <div className="flex gap-2">
                           <button onClick={() => openEditProduct(p)} className="p-1.5 text-bark-400 hover:text-bark-700 hover:bg-cream-100 rounded-lg transition-colors"><Edit2 size={14} /></button>
@@ -495,6 +511,7 @@ export default function Dashboard() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </div>
@@ -677,6 +694,109 @@ export default function Dashboard() {
                 </div>
               </div>
             ))
+          )}
+        </div>
+      )}
+
+      {/* ── Fees ── */}
+      {activeTab === 'fees' && (
+        <div className="space-y-6">
+          {/* Header con pulsante ricarica */}
+          <div className="flex items-center justify-between">
+            <h2 className="font-serif text-xl text-bark-900">Le mie quote</h2>
+            <button
+              onClick={async () => {
+                setFeesRefreshing(true);
+                await refreshFees();
+                setFeesRefreshing(false);
+              }}
+              disabled={feesRefreshing}
+              className="flex items-center gap-2 text-sm text-bark-500 hover:text-bark-800 transition-colors disabled:opacity-50 font-sans"
+            >
+              <RefreshCw size={15} className={feesRefreshing ? 'animate-spin' : ''} />
+              Aggiorna
+            </button>
+          </div>
+
+          {/* Sommario */}
+          {myFees.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                {
+                  label: 'Da pagare',
+                  value: `€${myFees.filter(f=>f.status==='pending').reduce((s,f)=>s+f.amount,0).toFixed(2)}`,
+                  sub: `${myFees.filter(f=>f.status==='pending').length} quote in attesa`,
+                  color: 'bg-rose-50 border-rose-200 text-rose-800',
+                },
+                {
+                  label: 'Già pagate',
+                  value: `€${myFees.filter(f=>f.status==='paid').reduce((s,f)=>s+f.amount,0).toFixed(2)}`,
+                  sub: `${myFees.filter(f=>f.status==='paid').length} quote pagate`,
+                  color: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+                },
+                {
+                  label: 'Quote totali',
+                  value: myFees.length,
+                  sub: 'tutti gli stati',
+                  color: 'bg-cream-100 border-cream-200 text-bark-700',
+                },
+              ].map(s => (
+                <div key={s.label} className={`rounded-2xl border p-4 ${s.color}`}>
+                  <p className="text-2xl font-serif font-semibold">{s.value}</p>
+                  <p className="text-xs font-sans mt-0.5 opacity-70">{s.label} · {s.sub}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {myFees.length === 0 ? (
+            <div className="text-center py-16 card">
+              <Banknote size={48} className="text-cream-300 mx-auto mb-4" />
+              <p className="font-serif text-xl text-bark-700 mb-2">Nessuna quota</p>
+              <p className="text-bark-400 font-sans text-sm">
+                Le quote per la pubblicazione di eventi e l'attivazione dell'evidenza appariranno qui.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {myFees.map(fee => {
+                const FEE_TYPE_LABEL: Record<PendingFee['type'], string> = {
+                  event_publish:   'Pubblicazione evento',
+                  feature_event:   'Messa in evidenza — evento',
+                  feature_product: 'Messa in evidenza — prodotto',
+                };
+                const FEE_STATUS: Record<PendingFee['status'], { label: string; color: string; icon: React.ReactNode }> = {
+                  pending: { label: 'In attesa di pagamento', color: 'bg-amber-50 border-amber-200 text-amber-700', icon: <AlertCircle size={14} /> },
+                  paid:    { label: 'Pagata',                color: 'bg-emerald-50 border-emerald-200 text-emerald-700', icon: <CheckCircle2 size={14} /> },
+                  waived:  { label: 'Condonata',             color: 'bg-cream-100 border-cream-200 text-bark-500', icon: <XCircle size={14} /> },
+                };
+                const st = FEE_STATUS[fee.status];
+                return (
+                  <div key={fee.id} className={`border rounded-2xl p-4 sm:p-5 ${fee.status === 'pending' ? 'bg-amber-50/40 border-amber-200' : 'bg-white border-cream-200'}`}>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-bark-900 font-sans">{FEE_TYPE_LABEL[fee.type]}</p>
+                        <p className="text-xs text-bark-500 font-sans mt-0.5 truncate">{fee.referenceTitle}</p>
+                        <p className="text-xs text-bark-400 font-sans mt-0.5">Creata il {fee.createdAt}</p>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <p className="font-serif text-lg text-bark-900 font-semibold">€{fee.amount.toFixed(2)}</p>
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-sans font-medium px-2.5 py-1 rounded-full border ${st.color}`}>
+                          {st.icon}{st.label}
+                        </span>
+                      </div>
+                    </div>
+                    {fee.status === 'pending' && (
+                      <div className="mt-3 pt-3 border-t border-amber-200/60">
+                        <p className="text-xs text-amber-700 font-sans">
+                          <strong>Come pagare:</strong> Il gestore della piattaforma ti contatterà via email o telefono per ricevere il pagamento di questa quota.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}

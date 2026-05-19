@@ -2,7 +2,7 @@ import {
   createContext, useContext, useReducer, useEffect,
   ReactNode, useRef,
 } from 'react';
-import { User, Product, CartItem, TimeSlot, Order, Event } from '../types';
+import { User, Product, CartItem, TimeSlot, Order, Event, PendingFee, FeeCartItem } from '../types';
 import { USERS, PRODUCTS, EVENTS, INITIAL_SLOTS, generateSlots } from '../data/mockData';
 import { supabase, supabasePublic } from '../lib/supabase';
 
@@ -11,7 +11,6 @@ const HAS_SUPABASE =
   Boolean(import.meta.env.VITE_SUPABASE_URL) &&
   Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY);
 
-// snake_case DB rows → camelCase TS types
 function rowToUser(r: Record<string, unknown>): User {
   return {
     id:          r.id as string,
@@ -44,12 +43,12 @@ function rowToEvent(r: Record<string, unknown>): Event {
     timeStart:        (r.time_start as string) ?? '',
     timeEnd:          (r.time_end as string) ?? '',
     image:            (r.image as string) ?? '',
-    tags:             [],
+    tags:             (r.tags as string[]) ?? [],
     status:           (r.status as Event['status']) ?? 'upcoming',
     productsCount:    Number(r.products_count ?? 0),
     maxAttendees:     r.max_attendees != null ? Number(r.max_attendees) : undefined,
     currentAttendees: Number(r.current_attendees ?? 0),
-    price:            0,
+    price:            Number(r.price ?? 0),
     featured:         Boolean(r.featured),
     slotMaxCapacity:  r.slot_max_capacity != null ? Number(r.slot_max_capacity) : undefined,
   };
@@ -76,7 +75,7 @@ function rowToProduct(r: Record<string, unknown>): Product {
     status:        (r.status as Product['status']) ?? 'available',
     featured:      Boolean(r.featured),
     views:         Number(r.views ?? 0),
-    saves:         0,
+    saves:         Number(r.saves ?? 0),
     createdAt:     (r.created_at as string)?.slice(0, 10) ?? '',
   };
 }
@@ -93,6 +92,21 @@ function rowToSlot(r: Record<string, unknown>): TimeSlot {
   };
 }
 
+function rowToPendingFee(r: Record<string, unknown>, usersMap?: Record<string, string>): PendingFee {
+  return {
+    id:             r.id as string,
+    type:           r.type as PendingFee['type'],
+    sellerId:       r.seller_id as string,
+    sellerName:     usersMap ? (usersMap[r.seller_id as string] ?? '—') : undefined,
+    referenceId:    r.reference_id as string,
+    referenceTitle: (r.reference_title as string) ?? '',
+    amount:         Number(r.amount ?? 0),
+    status:         (r.status as PendingFee['status']) ?? 'pending',
+    createdAt:      (r.created_at as string)?.slice(0, 10) ?? '',
+    paidAt:         (r.paid_at as string | undefined) ?? undefined,
+  };
+}
+
 // ── State ────────────────────────────────────────────────────────────────────
 interface State {
   user:         User | null;
@@ -101,15 +115,17 @@ interface State {
   events:       Event[];
   orders:       Order[];
   cart:         CartItem[];
+  feeCart:      FeeCartItem[];   // quote servizi da pagare (pubbl. evento, evidenza)
   wishlist:     string[];
   isAuthOpen:   boolean;
   authMode:     'login' | 'register';
   notification: { message: string; type: 'success' | 'error' | 'info' } | null;
   slots:        Record<string, TimeSlot[]>;
   loading:      boolean;
-  authLoading:  boolean;  // true finché il profilo DB non è caricato dopo onAuthStateChange
-  eventFee:     number;   // quota che il venditore paga per pubblicare un evento
-  featureFee:   number;   // quota per mettere in evidenza un evento o un prodotto
+  authLoading:  boolean;
+  eventFee:     number;
+  featureFee:   number;
+  pendingFees:  PendingFee[];
 }
 
 type Action =
@@ -122,16 +138,24 @@ type Action =
   | { type: 'INIT_DATA'; users: User[]; products: Product[]; events: Event[]; slots: Record<string, TimeSlot[]> }
   | { type: 'SET_WISHLIST'; ids: string[] }
   | { type: 'SET_ORDERS'; orders: Order[] }
+  | { type: 'SET_PENDING_FEES'; fees: PendingFee[] }
+  | { type: 'ADD_PENDING_FEE'; fee: PendingFee }
+  | { type: 'UPDATE_PENDING_FEE'; id: string; status: PendingFee['status']; paidAt?: string }
+  // Fee cart
+  | { type: 'ADD_TO_FEE_CART';      item: FeeCartItem }
+  | { type: 'REMOVE_FROM_FEE_CART'; itemId: string }
+  | { type: 'CLEAR_FEE_CART' }
   // Products
   | { type: 'ADD_PRODUCT';    product:   Product }
   | { type: 'UPDATE_PRODUCT'; product:   Product }
   | { type: 'DELETE_PRODUCT'; productId: string  }
+  | { type: 'MARK_PRODUCTS_SOLD'; productIds: string[] }
   // Events
   | { type: 'ADD_EVENT';    event:   Event  }
   | { type: 'UPDATE_EVENT'; event:   Event  }
   | { type: 'DELETE_EVENT'; eventId: string }
   // Cart
-  | { type: 'ADD_TO_CART';     product: Product }
+  | { type: 'ADD_TO_CART';      product:  Product }
   | { type: 'REMOVE_FROM_CART'; productId: string }
   | { type: 'UPDATE_QUANTITY';  productId: string; quantity: number }
   | { type: 'CLEAR_CART' }
@@ -141,14 +165,14 @@ type Action =
   // Wishlist
   | { type: 'TOGGLE_WISHLIST'; productId: string }
   // Notify
-  | { type: 'NOTIFY';       message: string; notifType: 'success' | 'error' | 'info' }
+  | { type: 'NOTIFY';      message: string; notifType: 'success' | 'error' | 'info' }
   | { type: 'CLEAR_NOTIFY' }
   // Slots
-  | { type: 'BOOK_SLOT';           eventId: string; slotId: string }
-  | { type: 'CANCEL_BOOKING';      eventId: string; slotId: string }
-  | { type: 'SET_SLOT_CAPACITY';   eventId: string; slotId: string; capacity: number }
-  | { type: 'TOGGLE_SLOT_DISABLED';eventId: string; slotId: string }
-  | { type: 'INIT_EVENT_SLOTS';    eventId: string; timeStart: string; timeEnd: string; capacity: number }
+  | { type: 'BOOK_SLOT';            eventId: string; slotId: string }
+  | { type: 'CANCEL_BOOKING';       eventId: string; slotId: string }
+  | { type: 'SET_SLOT_CAPACITY';    eventId: string; slotId: string; capacity: number }
+  | { type: 'TOGGLE_SLOT_DISABLED'; eventId: string; slotId: string }
+  | { type: 'INIT_EVENT_SLOTS';     eventId: string; timeStart: string; timeEnd: string; capacity: number }
   | { type: 'SET_EVENT_FEE';   fee: number }
   | { type: 'SET_FEATURE_FEE'; fee: number }
   | { type: 'SET_AUTH_LOADING'; value: boolean };
@@ -160,15 +184,17 @@ const initialState: State = {
   events:       HAS_SUPABASE ? [] : EVENTS,
   orders:       [],
   cart:         [],
+  feeCart:      [],
   wishlist:     [],
   isAuthOpen:   false,
   authMode:     'login',
   notification: null,
   slots:        HAS_SUPABASE ? {} : INITIAL_SLOTS,
   loading:      HAS_SUPABASE,
-  authLoading:  HAS_SUPABASE,  // aspetta fino al primo onAuthStateChange
+  authLoading:  HAS_SUPABASE,
   eventFee:     0,
   featureFee:   0,
+  pendingFees:  [],
 };
 
 function reducer(state: State, action: Action): State {
@@ -176,7 +202,7 @@ function reducer(state: State, action: Action): State {
     case 'LOGIN':
       return { ...state, user: action.payload, isAuthOpen: false };
     case 'LOGOUT':
-      return { ...state, user: null, wishlist: [], orders: [] };
+      return { ...state, user: null, wishlist: [], orders: [], pendingFees: [], feeCart: [] };
     case 'REGISTER': {
       const exists = state.users.find(u => u.email === action.payload.email);
       if (exists) return state;
@@ -185,16 +211,39 @@ function reducer(state: State, action: Action): State {
     case 'OPEN_AUTH':   return { ...state, isAuthOpen: true, authMode: action.mode };
     case 'CLOSE_AUTH':  return { ...state, isAuthOpen: false };
     case 'SET_LOADING': return { ...state, loading: action.value };
-    case 'INIT_DATA':
-      return { ...state, users: action.users, products: action.products, events: action.events, slots: action.slots, loading: false };
-    case 'SET_EVENT_FEE':
-      return { ...state, eventFee: action.fee };
-    case 'SET_FEATURE_FEE':
-      return { ...state, featureFee: action.fee };
-    case 'SET_AUTH_LOADING':
-      return { ...state, authLoading: action.value };
-    case 'SET_WISHLIST': return { ...state, wishlist: action.ids };
-    case 'SET_ORDERS':   return { ...state, orders: action.orders };
+    case 'INIT_DATA': {
+      // Re-applica lo stato "sold" dai prodotti acquistati in sessioni precedenti
+      // (localStorage è il fallback finché la RLS policy DB è attiva)
+      let soldIds: string[] = [];
+      try { soldIds = JSON.parse(localStorage.getItem('_sold_ids') ?? '[]'); } catch { /* */ }
+      const products = soldIds.length > 0
+        ? action.products.map(p => soldIds.includes(p.id) ? { ...p, status: 'sold' as const } : p)
+        : action.products;
+      return { ...state, users: action.users, products, events: action.events, slots: action.slots, loading: false };
+    }
+    case 'SET_EVENT_FEE':     return { ...state, eventFee: action.fee };
+    case 'SET_FEATURE_FEE':   return { ...state, featureFee: action.fee };
+    case 'SET_AUTH_LOADING':  return { ...state, authLoading: action.value };
+    case 'SET_WISHLIST':      return { ...state, wishlist: action.ids };
+    case 'SET_ORDERS':        return { ...state, orders: action.orders };
+    case 'SET_PENDING_FEES':  return { ...state, pendingFees: action.fees };
+    case 'ADD_PENDING_FEE':   return { ...state, pendingFees: [action.fee, ...state.pendingFees] };
+    case 'UPDATE_PENDING_FEE':
+      return {
+        ...state,
+        pendingFees: state.pendingFees.map(f =>
+          f.id === action.id ? { ...f, status: action.status, paidAt: action.paidAt } : f
+        ),
+      };
+    // Fee cart
+    case 'ADD_TO_FEE_CART':
+      // Evita duplicati: non aggiungere lo stesso referenceId+type due volte
+      if (state.feeCart.some(i => i.referenceId === action.item.referenceId && i.type === action.item.type)) return state;
+      return { ...state, feeCart: [...state.feeCart, action.item] };
+    case 'REMOVE_FROM_FEE_CART':
+      return { ...state, feeCart: state.feeCart.filter(i => i.id !== action.itemId) };
+    case 'CLEAR_FEE_CART':
+      return { ...state, feeCart: [] };
 
     // ── Products ──
     case 'ADD_PRODUCT':
@@ -203,6 +252,13 @@ function reducer(state: State, action: Action): State {
       return { ...state, products: state.products.map(p => p.id === action.product.id ? action.product : p) };
     case 'DELETE_PRODUCT':
       return { ...state, products: state.products.filter(p => p.id !== action.productId) };
+    case 'MARK_PRODUCTS_SOLD':
+      return {
+        ...state,
+        products: state.products.map(p =>
+          action.productIds.includes(p.id) ? { ...p, status: 'sold' as const } : p
+        ),
+      };
 
     // ── Events ──
     case 'ADD_EVENT':
@@ -243,7 +299,7 @@ function reducer(state: State, action: Action): State {
       };
 
     // ── Notify ──
-    case 'NOTIFY':      return { ...state, notification: { message: action.message, type: action.notifType } };
+    case 'NOTIFY':       return { ...state, notification: { message: action.message, type: action.notifType } };
     case 'CLEAR_NOTIFY': return { ...state, notification: null };
 
     // ── Slots ──
@@ -299,7 +355,6 @@ function reducer(state: State, action: Action): State {
 // ── Context interface ────────────────────────────────────────────────────────
 interface ContextValue {
   state: State;
-  // Auth — returns null on success, error string on failure
   login:    (email: string, password: string) => Promise<string | null>;
   logout:   () => void;
   register: (name: string, email: string, password: string, city: string, role: User['role']) => Promise<string | null>;
@@ -313,11 +368,18 @@ interface ContextValue {
   addEvent:    (event: Event) => void;
   updateEvent: (event: Event) => void;
   deleteEvent: (eventId: string) => void;
-  // Cart
+  // Cart prodotti
   addToCart:      (product: Product) => void;
   removeFromCart: (productId: string) => void;
   updateQuantity: (productId: string, quantity: number) => void;
   clearCart:      () => void;
+  // Fee cart
+  addToFeeCart:       (item: FeeCartItem) => void;
+  removeFromFeeCart:  (itemId: string) => void;
+  clearFeeCart:       () => void;
+  checkoutFeeCart:    () => Promise<boolean>;  // crea pending_fees e svuota carrello
+  feeCartCount:       number;
+  feeCartTotal:       number;
   // Orders
   placeOrder: (address: string, city: string) => Promise<Order | null>;
   // Wishlist
@@ -331,9 +393,13 @@ interface ContextValue {
   toggleSlotDisabled: (eventId: string, slotId: string) => void;
   initEventSlots:     (eventId: string, timeStart: string, timeEnd: string, capacity: number) => void;
   getUserBookedSlot:  (eventId: string) => TimeSlot | null;
-  // Admin — restituiscono true se il salvataggio è andato a buon fine
-  updateEventFee:   (fee: number) => Promise<boolean>;
-  updateFeatureFee: (fee: number) => Promise<boolean>;
+  // Admin
+  updateEventFee:     (fee: number) => Promise<boolean>;
+  updateFeatureFee:   (fee: number) => Promise<boolean>;
+  markFeeAsPaid:      (feeId: string) => Promise<boolean>;
+  markFeeAsWaived:    (feeId: string) => Promise<boolean>;
+  loadAllPendingFees: () => Promise<void>;
+  refreshFees:        () => Promise<void>;
   // Computed
   cartCount: number;
   cartTotal: number;
@@ -344,15 +410,18 @@ const AppContext = createContext<ContextValue | null>(null);
 // ── Provider ─────────────────────────────────────────────────────────────────
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
-  // Keep a ref to state so async callbacks see the latest value
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // Token tenuto in un ref — scritto SINCRONO al momento dell'evento auth,
+  // prima di qualsiasi operazione asincrona, per evitare il race condition
+  // in cui Chrome non ha ancora scritto il token in localStorage.
+  const sessionTokenRef = useRef<string | null>(null);
 
   // ── Supabase bootstrap ────────────────────────────────────────────────────
   useEffect(() => {
     if (!HAS_SUPABASE) return;
 
-    // Safety net: force loading:false after 3 s so the app never hangs.
     const loadingTimeout = setTimeout(() => {
       if (stateRef.current.loading) {
         console.warn('Supabase loadData timeout — forcing loading:false');
@@ -360,9 +429,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }, 8000);
 
-    // ── Phase 1: critical data (blocks the loading screen) ───────────────────
-    // Only the data needed to render the home/list pages immediately.
-    // Slots & bookings are deferred to Phase 2 so the app appears faster.
     const loadCritical = async () => {
       const [eventsRes, productsRes, profilesRes, settingsRes] = await Promise.all([
         supabasePublic.from('events').select('*').order('date', { ascending: true }),
@@ -380,19 +446,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const products = (productsRes.data ?? []).map(rowToProduct);
       const users    = (profilesRes.data ?? []).map(rowToUser);
 
-      // App settings (event fee, feature fee, etc.)
       const rows = settingsRes.data ?? [];
       const feeRow     = (rows as Record<string, unknown>[]).find(r => r.key === 'event_fee');
       const featFeeRow = (rows as Record<string, unknown>[]).find(r => r.key === 'feature_fee');
       if (feeRow)     dispatch({ type: 'SET_EVENT_FEE',   fee: Number(feeRow.value) });
       if (featFeeRow) dispatch({ type: 'SET_FEATURE_FEE', fee: Number(featFeeRow.value) });
 
-      // Unlock the UI immediately with empty slots — Phase 2 fills them in
       dispatch({ type: 'INIT_DATA', users, products, events, slots: {} });
       clearTimeout(loadingTimeout);
     };
 
-    // ── Phase 2: deferred data (slots + bookings, needed only on event detail) ─
     const loadDeferred = async () => {
       const [slotsRes, bookingsRes] = await Promise.all([
         supabasePublic.from('time_slots').select('*'),
@@ -421,7 +484,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         slots[slot.eventId].push(slot);
       }
 
-      // Merge slots into existing state without touching loading flag
       dispatch({ type: 'INIT_DATA',
         users:    stateRef.current.users,
         products: stateRef.current.products,
@@ -430,7 +492,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     };
 
-    // Run Phase 1 — when done, kick off Phase 2 in background
     loadCritical()
       .then(() => loadDeferred().catch(err => console.error('loadDeferred:', err)))
       .catch(err => {
@@ -439,20 +500,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         clearTimeout(loadingTimeout);
       });
 
-    // 2. Auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // ── Scrivi il token nel ref SUBITO (sincrono) ───────────────────────────
+      // Chrome PC: supabase-js scrive in localStorage in modo asincrono,
+      // quindi getAccessToken() fallirebbe se leggesse solo localStorage.
+      sessionTokenRef.current = session?.access_token ?? null;
+
       if (session?.user) {
         const su = session.user;
         const meta = (su.user_metadata ?? {}) as Record<string, unknown>;
 
-        // Mark auth as loading — the role from metadata may be stale (e.g. if admin
-        // role was set directly in the DB after registration). We must NOT redirect
-        // role-protected pages until the real profile arrives from the DB.
         dispatch({ type: 'SET_AUTH_LOADING', value: true });
 
-        // Dispatch a tempUser from session metadata immediately so the UI
-        // is responsive (navbar, avatar) while the profile query runs.
-        // Role-protected pages (AdminDashboard) will wait for authLoading:false.
         const tempUser: User = {
           id:          su.id,
           name:        (meta.name as string) || su.email?.split('@')[0] || '',
@@ -472,23 +531,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'LOGIN', payload: tempUser });
         }
 
-        // Load the real profile from DB — this is the source of truth for role.
-        // Use supabasePublic (no session, no refresh-hang risk) — profiles
-        // have a `using (true)` SELECT policy so anon can always read them.
         const { data: profile } = await supabasePublic
-          .from('profiles')
-          .select('*')
-          .eq('id', su.id)
-          .single();
+          .from('profiles').select('*').eq('id', su.id).single();
 
         if (profile) {
           dispatch({ type: 'LOGIN', payload: rowToUser(profile as Record<string, unknown>) });
         }
 
-        // Auth is now resolved — role-protected pages can evaluate their guard
         dispatch({ type: 'SET_AUTH_LOADING', value: false });
 
-        // Load user-specific data (wishlist + orders) in parallel
+        // Dati utente-specifici
         const [wishRes, ordersRes] = await Promise.all([
           supabase.from('wishlists').select('product_id').eq('user_id', su.id),
           supabase.from('orders').select('*, order_items(*)').eq('user_id', su.id).order('created_at', { ascending: false }),
@@ -527,8 +579,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           })),
         }));
         dispatch({ type: 'SET_ORDERS', orders });
+
+        // Quote del venditore — usa fetch diretto (bypass mutex)
+        void loadUserFees(su.id);
+
       } else {
-        // No session (SIGNED_OUT or no user) — auth check complete
+        sessionTokenRef.current = null;
         dispatch({ type: 'SET_AUTH_LOADING', value: false });
         if (event === 'SIGNED_OUT') {
           dispatch({ type: 'LOGOUT' });
@@ -542,6 +598,82 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Token helper ──────────────────────────────────────────────────────────
+  const getAccessToken = (): string | null => {
+    // 1. Ref — scritto sincrono dall'auth callback (sempre aggiornato su tutti i browser)
+    if (sessionTokenRef.current) return sessionTokenRef.current;
+    // 2. localStorage — fallback per ricariche di pagina successive
+    try {
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+      const projectRef  = new URL(SUPABASE_URL).hostname.split('.')[0];
+      const raw = localStorage.getItem(`sb-${projectRef}-auth-token`);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { access_token?: string };
+        if (parsed?.access_token) return parsed.access_token;
+      }
+    } catch { /* ignore */ }
+    return null;
+  };
+
+  // ── Direct REST helpers (bypass supabase-js mutex) ────────────────────────
+  const directRequest = async (
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    path: string,
+    body?: Record<string, unknown>,
+    prefer?: string,
+  ): Promise<{ ok: boolean; data?: unknown; error?: string }> => {
+    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+    const ANON_KEY     = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+    const token = getAccessToken();
+    if (!token) return { ok: false, error: 'no_token' };
+
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${token}`,
+      'apikey':        ANON_KEY,
+      'Accept':        'application/json',
+    };
+    if (body)   headers['Content-Type'] = 'application/json';
+    if (prefer) headers['Prefer']       = prefer;
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      // 401 = sessione scaduta/revocata → logout automatico
+      if (res.status === 401) {
+        sessionTokenRef.current = null;
+        dispatch({ type: 'LOGOUT' });
+        return { ok: false, error: 'session_expired' };
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { message?: string; error?: string };
+        return { ok: false, error: (err.message ?? err.error) ?? `HTTP ${res.status}` };
+      }
+      const data = method === 'GET' ? await res.json() : undefined;
+      return { ok: true, data };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  };
+
+  const notifyErr = (msg: string) => {
+    dispatch({ type: 'NOTIFY', message: msg, notifType: 'error' });
+    setTimeout(() => dispatch({ type: 'CLEAR_NOTIFY' }), 4000);
+  };
+
+  // ── Load user fees (direct fetch) ─────────────────────────────────────────
+  const loadUserFees = async (userId: string) => {
+    const { ok, data, error } = await directRequest(
+      'GET',
+      `pending_fees?seller_id=eq.${userId}&order=created_at.desc`,
+    );
+    if (!ok) { console.error('loadUserFees:', error); return; }
+    const fees = ((data as Record<string, unknown>[]) ?? []).map(r => rowToPendingFee(r));
+    dispatch({ type: 'SET_PENDING_FEES', fees });
+  };
+
   // ── Auth ──────────────────────────────────────────────────────────────────
   const login = async (email: string, password: string): Promise<string | null> => {
     if (!HAS_SUPABASE) {
@@ -553,9 +685,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (error) return error.message;
     if (!data.user) return 'Login fallito. Riprova.';
 
-    // Dispatch an immediate tempUser built from auth metadata so the UI
-    // is usable right away — no extra DB round-trip inside login().
-    // onAuthStateChange fires next and overwrites with the full profile row.
     const meta = (data.user.user_metadata ?? {}) as Record<string, unknown>;
     const tempUser: User = {
       id:          data.user.id,
@@ -574,8 +703,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     dispatch({ type: 'LOGIN', payload: tempUser });
 
-    // Load full profile in background (updates avatar, rating, etc.)
-    // Use supabasePublic — profiles are publicly readable, no refresh risk.
     void supabasePublic.from('profiles').select('*').eq('id', data.user.id).single()
       .then(({ data: profile }) => {
         if (profile) dispatch({ type: 'LOGIN', payload: rowToUser(profile as Record<string, unknown>) });
@@ -611,22 +738,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
+      email, password,
       options: { data: { name, city, role } },
     });
     if (error) return error.message;
 
-    // Pre-populate user in state immediately (mailer_autoconfirm is enabled).
-    // onAuthStateChange will overwrite with the real profile row once the
-    // DB trigger has created it.
     if (data.user) {
       const tempUser: User = {
         id:          data.user.id,
-        name,
-        email,
-        role,
-        city,
+        name, email, role, city,
         avatar:      `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=8B6A3E&color=FAF7F2&size=200`,
         bio:         '',
         rating:      0,
@@ -643,12 +763,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const openAuth  = (mode: 'login' | 'register') => dispatch({ type: 'OPEN_AUTH', mode });
   const closeAuth = () => dispatch({ type: 'CLOSE_AUTH' });
-
-  // ── helper: show error toast + rollback ──────────────────────────────────
-  const notifyErr = (msg: string) => {
-    dispatch({ type: 'NOTIFY', message: msg, notifType: 'error' });
-    setTimeout(() => dispatch({ type: 'CLEAR_NOTIFY' }), 4000);
-  };
 
   // ── Products ──────────────────────────────────────────────────────────────
   const addProduct = (product: Product) => {
@@ -673,6 +787,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       original_price: product.originalPrice ?? null,
       status:         product.status,
       featured:       product.featured,
+      saves:          0,
     }).then(({ error }) => {
       if (error) {
         console.error('addProduct:', error);
@@ -683,7 +798,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const updateProduct = (product: Product) => {
+    const previous = stateRef.current.products.find(p => p.id === product.id);
     dispatch({ type: 'UPDATE_PRODUCT', product });
+    // Se il venditore rimette disponibile un prodotto che era sold in localStorage, rimuovilo
+    if (product.status !== 'sold') {
+      try {
+        const prev: string[] = JSON.parse(localStorage.getItem('_sold_ids') ?? '[]');
+        const updated = prev.filter(id => id !== product.id);
+        if (updated.length !== prev.length) localStorage.setItem('_sold_ids', JSON.stringify(updated));
+      } catch { /* ignore */ }
+    }
     if (!HAS_SUPABASE) return;
     supabase.from('products').update({
       title:          product.title,
@@ -706,6 +830,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (error) {
         console.error('updateProduct:', error);
         notifyErr(`Errore nell'aggiornamento del prodotto: ${error.message}`);
+        return;
+      }
+      // Aggiunge al fee cart se appena messo in evidenza
+      const wasNotFeatured = !previous?.featured;
+      if (product.featured && wasNotFeatured && stateRef.current.featureFee > 0) {
+        dispatch({
+          type: 'ADD_TO_FEE_CART',
+          item: {
+            id:             `fc_fp_${product.id}`,
+            type:           'feature_product',
+            referenceId:    product.id,
+            referenceTitle: product.title,
+            amount:         stateRef.current.featureFee,
+          },
+        });
       }
     });
   };
@@ -725,6 +864,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ── Events ────────────────────────────────────────────────────────────────
   const addEvent = (event: Event) => {
     dispatch({ type: 'ADD_EVENT', event });
+
+    // ── Dispatch fee cart voci SUBITO (sincrono/ottimistico) ────────────────
+    // Deve avvenire PRIMA della navigazione a /checkout-quote, non nel .then()
+    // che su PC veloce arriva dopo la navigazione e lascerebbe il cart vuoto.
+    const feeItemIds: string[] = [];
+    if (stateRef.current.eventFee > 0) {
+      const feeId = `fc_ep_${event.id}`;
+      feeItemIds.push(feeId);
+      dispatch({
+        type: 'ADD_TO_FEE_CART',
+        item: {
+          id:             feeId,
+          type:           'event_publish',
+          referenceId:    event.id,
+          referenceTitle: event.title,
+          amount:         stateRef.current.eventFee,
+        },
+      });
+    }
+    if (event.featured && stateRef.current.featureFee > 0) {
+      const feeId = `fc_fe_${event.id}`;
+      feeItemIds.push(feeId);
+      dispatch({
+        type: 'ADD_TO_FEE_CART',
+        item: {
+          id:             feeId,
+          type:           'feature_event',
+          referenceId:    event.id,
+          referenceTitle: event.title,
+          amount:         stateRef.current.featureFee,
+        },
+      });
+    }
+
     if (!HAS_SUPABASE) return;
     supabase.from('events').insert({
       id:                event.id,
@@ -740,6 +913,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       city:              event.city,
       address:           event.address,
       image:             event.image,
+      tags:              event.tags,
+      price:             event.price,
       products_count:    event.productsCount,
       max_attendees:     event.maxAttendees ?? null,
       current_attendees: event.currentAttendees,
@@ -749,12 +924,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (error) {
         console.error('addEvent:', error);
         dispatch({ type: 'DELETE_EVENT', eventId: event.id });
+        // Rollback fee cart items aggiunti ottimisticamente
+        feeItemIds.forEach(id => dispatch({ type: 'REMOVE_FROM_FEE_CART', itemId: id }));
         notifyErr(`Errore nel salvataggio dell'evento: ${error.message}`);
       }
     });
   };
 
   const updateEvent = (event: Event) => {
+    const previous = stateRef.current.events.find(e => e.id === event.id);
     dispatch({ type: 'UPDATE_EVENT', event });
     if (!HAS_SUPABASE) return;
     supabase.from('events').update({
@@ -769,6 +947,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       city:              event.city,
       address:           event.address,
       image:             event.image,
+      tags:              event.tags,
+      price:             event.price,
       products_count:    event.productsCount,
       max_attendees:     event.maxAttendees ?? null,
       current_attendees: event.currentAttendees,
@@ -778,6 +958,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (error) {
         console.error('updateEvent:', error);
         notifyErr(`Errore nell'aggiornamento dell'evento: ${error.message}`);
+        return;
+      }
+      // Quota evidenza se appena attivata
+      const wasNotFeatured = !previous?.featured;
+      if (event.featured && wasNotFeatured && stateRef.current.featureFee > 0) {
+        dispatch({
+          type: 'ADD_TO_FEE_CART',
+          item: {
+            id:             `fc_fe_${event.id}`,
+            type:           'feature_event',
+            referenceId:    event.id,
+            referenceTitle: event.title,
+            amount:         stateRef.current.featureFee,
+          },
+        });
       }
     });
   };
@@ -794,11 +989,61 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
   };
 
-  // ── Cart ──────────────────────────────────────────────────────────────────
-  const addToCart      = (product: Product)            => dispatch({ type: 'ADD_TO_CART', product });
-  const removeFromCart = (productId: string)           => dispatch({ type: 'REMOVE_FROM_CART', productId });
+  // ── Cart prodotti ─────────────────────────────────────────────────────────
+  const addToCart      = (product: Product)               => dispatch({ type: 'ADD_TO_CART', product });
+  const removeFromCart = (productId: string)              => dispatch({ type: 'REMOVE_FROM_CART', productId });
   const updateQuantity = (productId: string, qty: number) => dispatch({ type: 'UPDATE_QUANTITY', productId, quantity: qty });
-  const clearCart      = ()                            => dispatch({ type: 'CLEAR_CART' });
+  const clearCart      = ()                               => dispatch({ type: 'CLEAR_CART' });
+
+  // ── Fee cart ─────────────────────────────────────────────────────────────
+  const addToFeeCart      = (item: FeeCartItem) => dispatch({ type: 'ADD_TO_FEE_CART', item });
+  const removeFromFeeCart = (itemId: string)    => dispatch({ type: 'REMOVE_FROM_FEE_CART', itemId });
+  const clearFeeCart      = ()                  => dispatch({ type: 'CLEAR_FEE_CART' });
+
+  /** Conferma pagamento: registra pending_fees in DB e svuota il fee cart */
+  const checkoutFeeCart = async (): Promise<boolean> => {
+    const s = stateRef.current;
+    if (!s.user || s.feeCart.length === 0) return false;
+
+    const now = new Date().toISOString().slice(0, 10);
+    const results = await Promise.all(
+      s.feeCart.map(item => {
+        const feeId = `fee_${item.id}_${Date.now()}`;
+        const fee: PendingFee = {
+          id: feeId, type: item.type,
+          sellerId: s.user!.id, sellerName: s.user!.name,
+          referenceId: item.referenceId, referenceTitle: item.referenceTitle,
+          amount: item.amount, status: 'pending', createdAt: now,
+        };
+
+        if (!HAS_SUPABASE) {
+          dispatch({ type: 'ADD_PENDING_FEE', fee });
+          return Promise.resolve(true);
+        }
+
+        return directRequest('POST', 'pending_fees', {
+          id:              feeId,
+          type:            item.type,
+          seller_id:       s.user!.id,
+          reference_id:    item.referenceId,
+          reference_title: item.referenceTitle,
+          amount:          String(item.amount),
+          status:          'pending',
+        }, 'return=minimal').then(({ ok, error }) => {
+          if (!ok) { console.error('checkoutFeeCart:', error); return false; }
+          dispatch({ type: 'ADD_PENDING_FEE', fee });
+          return true;
+        });
+      })
+    );
+
+    const allOk = results.every(Boolean);
+    if (allOk) dispatch({ type: 'CLEAR_FEE_CART' });
+    return allOk;
+  };
+
+  const feeCartCount = state.feeCart.length;
+  const feeCartTotal = state.feeCart.reduce((s, i) => s + i.amount, 0);
 
   // ── Orders ────────────────────────────────────────────────────────────────
   const cartTotal = state.cart.reduce((s, i) => s + i.product.price * i.quantity, 0);
@@ -807,28 +1052,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const placeOrder = async (address: string, city: string): Promise<Order | null> => {
     const s = stateRef.current;
     if (!s.user || s.cart.length === 0) return null;
-    // Use stateRef cart to avoid stale closure on cartTotal
+
     const subtotal = s.cart.reduce((acc, i) => acc + i.product.price * i.quantity, 0);
     const shipping = subtotal > 100 ? 0 : 8.9;
     const orderId  = `ord_${Date.now()}`;
     const order: Order = {
-      id:        orderId,
-      userId:    s.user.id,
-      items:     [...s.cart],
-      subtotal,
-      shipping,
-      total:     subtotal + shipping,
-      status:    'confermato',
-      address,
-      city,
+      id: orderId, userId: s.user.id, items: [...s.cart],
+      subtotal, shipping, total: subtotal + shipping,
+      status: 'confermato', address, city,
       createdAt: new Date().toISOString().slice(0, 10),
     };
     dispatch({ type: 'PLACE_ORDER', order });
 
     if (!HAS_SUPABASE) return order;
 
-    // Persist to Supabase
-    const { error: orderErr } = await supabase.from('orders').insert({
+    // ── Usa directRequest per TUTTO (bypass mutex supabase-js su Chrome) ─────
+    const { ok: orderOk, error: orderError } = await directRequest('POST', 'orders', {
       id:       orderId,
       user_id:  s.user.id,
       status:   'confermato',
@@ -837,28 +1076,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
       shipping: order.shipping,
       address,
       city,
-    });
-    if (orderErr) {
-      console.error('placeOrder (orders):', orderErr);
-      // Rollback optimistic dispatch
-      dispatch({ type: 'NOTIFY', message: `Errore nell\'ordine: ${orderErr.message}`, notifType: 'error' });
+    }, 'return=minimal');
+
+    if (!orderOk) {
+      console.error('placeOrder (orders):', orderError);
+      dispatch({ type: 'NOTIFY', message: `Errore nel salvataggio dell'ordine: ${orderError}`, notifType: 'error' });
       setTimeout(() => dispatch({ type: 'CLEAR_NOTIFY' }), 4000);
       return null;
     }
 
+    // Inserisce le righe ordine in parallelo
     const ts = Date.now();
-    const itemRows = s.cart.map((item, idx) => ({
-      id:          `oi_${ts}_${idx}`,
-      order_id:    orderId,
-      product_id:  item.product.id,
-      title:       item.product.title,
-      price:       item.product.price,
-      image:       item.product.images[0] ?? '',
-      seller_id:   item.product.sellerId,
-      seller_name: s.users.find(u => u.id === item.product.sellerId)?.name ?? '',
-    }));
-    const { error: itemsErr } = await supabase.from('order_items').insert(itemRows);
-    if (itemsErr) console.error('placeOrder (items):', itemsErr);
+    await Promise.all(
+      s.cart.map((item, idx) =>
+        directRequest('POST', 'order_items', {
+          id:          `oi_${ts}_${idx}`,
+          order_id:    orderId,
+          product_id:  item.product.id,
+          title:       item.product.title,
+          price:       item.product.price,
+          image:       item.product.images[0] ?? '',
+          seller_id:   item.product.sellerId,
+          seller_name: s.users.find(u => u.id === item.product.sellerId)?.name ?? '',
+        }, 'return=minimal')
+          .then(({ ok, error }) => { if (!ok) console.error(`placeOrder item ${idx}:`, error); })
+      )
+    );
+
+    // ── Segna i prodotti come venduti ────────────────────────────────────────
+    const purchasedIds = s.cart.map(i => i.product.id);
+
+    // 1. Aggiorna lo stato locale subito (ottimistico)
+    dispatch({ type: 'MARK_PRODUCTS_SOLD', productIds: purchasedIds });
+
+    // 2. Persisti in localStorage così il sold status sopravvive al reload
+    //    (funziona anche prima che la RLS policy DB venga applicata)
+    try {
+      const prev: string[] = JSON.parse(localStorage.getItem('_sold_ids') ?? '[]');
+      const merged = Array.from(new Set([...prev, ...purchasedIds]));
+      localStorage.setItem('_sold_ids', JSON.stringify(merged));
+    } catch { /* ignore */ }
+
+    // 3. Aggiorna il DB via directRequest (bypass mutex + usa token attivo)
+    //    Richiede la policy "products: buyer mark sold" — vedi migration 005.
+    for (const pid of purchasedIds) {
+      directRequest('PATCH', `products?id=eq.${encodeURIComponent(pid)}`, { status: 'sold' }, 'return=minimal')
+        .then(({ ok, error }) => { if (!ok) console.warn(`mark sold ${pid}:`, error); });
+    }
 
     return order;
   };
@@ -891,24 +1155,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const user = stateRef.current.user;
     const bookingId = `bk_${sid}_${Date.now()}`;
     supabase.from('bookings').insert({
-      id:       bookingId,
-      slot_id:  sid,
-      event_id: eid,
-      user_id:  user.id,
-      status:   'confirmed',
+      id: bookingId, slot_id: sid, event_id: eid, user_id: user.id, status: 'confirmed',
     }).then(({ error }) => {
       if (error) {
         console.error('bookSlot:', error);
         dispatch({ type: 'CANCEL_BOOKING', eventId: eid, slotId: sid });
         notifyErr(`Errore nella prenotazione: ${error.message}`);
-      } else {
-        // Sync booked counter: count bookings for this slot
-        supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('slot_id', sid)
-          .then(({ count }) => {
-            if (count != null) {
-              supabase.from('time_slots').update({ booked: count }).eq('id', sid).then(() => {});
-            }
-          });
       }
     });
   };
@@ -917,8 +1169,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'CANCEL_BOOKING', eventId: eid, slotId: sid });
     if (!HAS_SUPABASE || !stateRef.current.user) return;
     const uid = stateRef.current.user.id;
-    supabase.from('bookings').delete()
-      .match({ slot_id: sid, user_id: uid })
+    supabase.from('bookings').delete().match({ slot_id: sid, user_id: uid })
       .then(({ error }) => {
         if (error) {
           console.error('cancelBooking:', error);
@@ -927,99 +1178,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
   };
 
-  const setSlotCapacity    = (eid: string, sid: string, cap: number) => dispatch({ type: 'SET_SLOT_CAPACITY',    eventId: eid, slotId: sid, capacity: cap });
+  const setSlotCapacity    = (eid: string, sid: string, cap: number) =>
+    dispatch({ type: 'SET_SLOT_CAPACITY', eventId: eid, slotId: sid, capacity: cap });
 
   const toggleSlotDisabled = (eid: string, sid: string) => {
     dispatch({ type: 'TOGGLE_SLOT_DISABLED', eventId: eid, slotId: sid });
     if (!HAS_SUPABASE) return;
-    // Read current disabled state and toggle in DB
     const current = stateRef.current.slots[eid]?.find(s => s.id === sid);
     if (!current) return;
-    const newDisabled = !current.disabled;
-    supabase.from('time_slots').update({ disabled: newDisabled }).eq('id', sid)
+    supabase.from('time_slots').update({ disabled: !current.disabled }).eq('id', sid)
       .then(({ error }) => { if (error) console.error('toggleSlotDisabled:', error); });
   };
 
   const initEventSlots = (eid: string, ts: string, te: string, cap: number) => {
     dispatch({ type: 'INIT_EVENT_SLOTS', eventId: eid, timeStart: ts, timeEnd: te, capacity: cap });
     if (!HAS_SUPABASE) return;
-    // Persist generated slots to DB (do after reducer has generated them via generateSlots logic)
-    // Re-generate the same slots client-side to get the IDs
     const generated = generateSlots(eid, ts, te, cap);
     if (generated.length === 0) return;
     const rows = generated.map(slot => ({
-      id:           slot.id,
-      event_id:     eid,
-      start_time:   slot.startTime,
-      end_time:     slot.endTime,
-      max_capacity: slot.maxCapacity,
-      disabled:     false,
+      id: slot.id, event_id: eid,
+      start_time: slot.startTime, end_time: slot.endTime,
+      max_capacity: slot.maxCapacity, disabled: false,
     }));
-    supabase.from('time_slots')
-      .upsert(rows, { onConflict: 'id' })
+    supabase.from('time_slots').upsert(rows, { onConflict: 'id' })
       .then(({ error }) => { if (error) console.error('initEventSlots:', error); });
   };
 
   // ── Admin ─────────────────────────────────────────────────────────────────
-
-  /** Aggiorna una quota in app_settings.
-   *  Legge il token DIRETTAMENTE da localStorage (bypass totale del client
-   *  supabase-js, che usa un mutex interno e si blocca se un refresh è
-   *  in corso). Poi usa fetch() diretto, come uploadImage. */
   const upsertSetting = async (key: string, value: number): Promise<boolean> => {
     if (!HAS_SUPABASE) return true;
-
-    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-    const ANON_KEY     = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-
-    // Chiave usata da supabase-js v2 per salvare la sessione in localStorage
-    const projectRef  = new URL(SUPABASE_URL).hostname.split('.')[0];
-    const storageKey  = `sb-${projectRef}-auth-token`;
-
-    let accessToken: string | null = null;
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw) as { access_token?: string };
-        accessToken = parsed?.access_token ?? null;
-      }
-    } catch {
-      // localStorage non disponibile o JSON corrotto
+    const { ok, error } = await directRequest('POST', 'app_settings',
+      { key, value: String(value) },
+      'resolution=merge-duplicates,return=minimal',
+    );
+    if (!ok) {
+      console.error(`upsertSetting(${key}):`, error);
+      notifyErr(`Errore nel salvataggio: ${error}`);
     }
-
-    if (!accessToken) {
-      notifyErr('Sessione non trovata — effettua di nuovo il login per salvare');
-      return false;
-    }
-
-    let res: Response;
-    try {
-      res = await fetch(`${SUPABASE_URL}/rest/v1/app_settings`, {
-        method:  'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'apikey':        ANON_KEY,
-          'Content-Type':  'application/json',
-          'Prefer':        'resolution=merge-duplicates,return=minimal',
-        },
-        body: JSON.stringify({ key, value: String(value) }),
-      });
-    } catch {
-      notifyErr('Errore di rete nel salvataggio');
-      return false;
-    }
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      const msg  = (body as { message?: string; error?: string }).message
-                ?? (body as { message?: string; error?: string }).error
-                ?? `HTTP ${res.status}`;
-      console.error(`upsertSetting(${key}):`, msg);
-      notifyErr(`Errore nel salvataggio: ${msg}`);
-      return false;
-    }
-
-    return true;
+    return ok;
   };
 
   const updateEventFee = async (fee: number): Promise<boolean> => {
@@ -1030,6 +1226,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateFeatureFee = async (fee: number): Promise<boolean> => {
     dispatch({ type: 'SET_FEATURE_FEE', fee });
     return upsertSetting('feature_fee', fee);
+  };
+
+  /** Carica TUTTE le pending_fees (admin) — usa fetch diretto per evitare mutex hang */
+  const loadAllPendingFees = async (): Promise<void> => {
+    if (!HAS_SUPABASE) return;
+    const { ok, data, error } = await directRequest(
+      'GET',
+      'pending_fees?select=*&order=created_at.desc',
+    );
+    if (!ok) { console.error('loadAllPendingFees:', error); return; }
+
+    const usersMap: Record<string, string> = {};
+    for (const u of stateRef.current.users) usersMap[u.id] = u.name;
+
+    const fees = ((data as Record<string, unknown>[]) ?? []).map(r => rowToPendingFee(r, usersMap));
+    dispatch({ type: 'SET_PENDING_FEES', fees });
+  };
+
+  const markFeeAsPaid = async (feeId: string): Promise<boolean> => {
+    const paidAt = new Date().toISOString().slice(0, 10);
+    const { ok, error } = await directRequest(
+      'PATCH',
+      `pending_fees?id=eq.${encodeURIComponent(feeId)}`,
+      { status: 'paid', paid_at: new Date().toISOString() },
+      'return=minimal',
+    );
+    if (!ok) { notifyErr(`Errore: ${error}`); return false; }
+    dispatch({ type: 'UPDATE_PENDING_FEE', id: feeId, status: 'paid', paidAt });
+    return true;
+  };
+
+  const markFeeAsWaived = async (feeId: string): Promise<boolean> => {
+    const { ok, error } = await directRequest(
+      'PATCH',
+      `pending_fees?id=eq.${encodeURIComponent(feeId)}`,
+      { status: 'waived' },
+      'return=minimal',
+    );
+    if (!ok) { notifyErr(`Errore: ${error}`); return false; }
+    dispatch({ type: 'UPDATE_PENDING_FEE', id: feeId, status: 'waived' });
+    return true;
   };
 
   const getUserBookedSlot = (eventId: string): TimeSlot | null => {
@@ -1043,9 +1280,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addProduct, updateProduct, deleteProduct,
       addEvent, updateEvent, deleteEvent,
       addToCart, removeFromCart, updateQuantity, clearCart,
+      addToFeeCart, removeFromFeeCart, clearFeeCart, checkoutFeeCart,
+      feeCartCount, feeCartTotal,
       placeOrder, toggleWishlist, notify, cartCount, cartTotal,
       bookSlot, cancelBooking, setSlotCapacity, toggleSlotDisabled,
-      initEventSlots, getUserBookedSlot, updateEventFee, updateFeatureFee,
+      initEventSlots, getUserBookedSlot,
+      updateEventFee, updateFeatureFee,
+      markFeeAsPaid, markFeeAsWaived, loadAllPendingFees,
+      refreshFees: () => {
+        const uid = stateRef.current.user?.id;
+        return uid ? loadUserFees(uid) : Promise.resolve();
+      },
     }}>
       {children}
     </AppContext.Provider>

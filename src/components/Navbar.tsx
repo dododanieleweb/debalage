@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { ShoppingBag, Heart, Menu, X, Search, User, LogOut, LayoutDashboard, ChevronDown, Package, Shield } from 'lucide-react';
+import { ShoppingBag, Heart, Menu, X, Search, User, LogOut, LayoutDashboard, ChevronDown, Package, Shield, Banknote } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 export default function Navbar() {
-  const { state, logout, openAuth, cartCount } = useApp();
+  const { state, logout, openAuth, cartCount, feeCartCount } = useApp();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -99,6 +99,21 @@ export default function Navbar() {
                   </span>
                 )}
               </Link>
+
+              {/* Fee cart (sellers only) */}
+              {state.user && (state.user.role === 'seller' || state.user.role === 'both') && feeCartCount > 0 && (
+                <Link
+                  to="/checkout-quote"
+                  className="relative p-2 rounded-full text-vintage-600 hover:text-vintage-800 hover:bg-vintage-50 transition-colors"
+                  aria-label="Quote da pagare"
+                  title="Quote da pagare"
+                >
+                  <Banknote size={20} />
+                  <span className="absolute top-0.5 right-0.5 w-4 h-4 bg-vintage-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                    {feeCartCount}
+                  </span>
+                </Link>
+              )}
 
               {/* Cart */}
               <Link

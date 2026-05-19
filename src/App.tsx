@@ -22,6 +22,7 @@ const Wishlist        = lazy(() => import('./pages/Wishlist'));
 const Dashboard       = lazy(() => import('./pages/Dashboard'));
 const Orders          = lazy(() => import('./pages/Orders'));
 const AdminDashboard  = lazy(() => import('./pages/AdminDashboard'));
+const FeeCheckout     = lazy(() => import('./pages/FeeCheckout'));
 const ComeFunziona    = lazy(() => import('./pages/ComeFunziona'));
 const Commissioni     = lazy(() => import('./pages/Commissioni'));
 const GuideFotografiche = lazy(() => import('./pages/GuideFotografiche'));
@@ -75,6 +76,7 @@ function AppShell() {
             <Route path="/dashboard"     element={<Dashboard />} />
             <Route path="/ordini"        element={<Orders />} />
             <Route path="/admin"         element={<AdminDashboard />} />
+            <Route path="/checkout-quote" element={<FeeCheckout />} />
             <Route path="/come-funziona"     element={<ComeFunziona />} />
             <Route path="/commissioni"       element={<Commissioni />} />
             <Route path="/guide-fotografiche" element={<GuideFotografiche />} />

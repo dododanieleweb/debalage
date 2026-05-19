@@ -10,4 +10,19 @@ if (!url || !key) {
   );
 }
 
+// Main client — handles auth (login / register / onAuthStateChange).
+// It reads the stored session from localStorage and may trigger a token
+// refresh on initialisation. Do NOT use it for public read-queries that
+// should always work regardless of auth state.
 export const supabase = createClient(url ?? '', key ?? '');
+
+// Public read-only client — never touches localStorage, never waits for
+// a session refresh.  Use this for loadCritical / loadDeferred so the
+// app loads even when the stored session is expired and the refresh hangs.
+export const supabasePublic = createClient(url ?? '', key ?? '', {
+  auth: {
+    persistSession:     false,
+    autoRefreshToken:   false,
+    detectSessionInUrl: false,
+  },
+});

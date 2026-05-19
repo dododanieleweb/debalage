@@ -53,7 +53,7 @@ export default function ProductDetail() {
           <span className="text-bark-700 truncate max-w-[200px]">{product.title}</span>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-12">
           {/* Images */}
           <div className="space-y-4">
             <div className="aspect-square rounded-3xl overflow-hidden bg-cream-100">
@@ -69,7 +69,7 @@ export default function ProductDetail() {
                   <button
                     key={i}
                     onClick={() => setActiveImage(i)}
-                    className={`w-20 h-20 rounded-xl overflow-hidden bg-cream-100 border-2 transition-all ${activeImage === i ? 'border-vintage-500' : 'border-transparent hover:border-cream-300'}`}
+                    className={`w-14 h-14 sm:w-20 sm:h-20 rounded-xl overflow-hidden bg-cream-100 border-2 transition-all ${activeImage === i ? 'border-vintage-500' : 'border-transparent hover:border-cream-300'}`}
                   >
                     <img src={img} alt="" className="w-full h-full object-cover" />
                   </button>
@@ -89,13 +89,13 @@ export default function ProductDetail() {
               {product.status === 'sold' && <span className="badge bg-bark-100 text-bark-600">Venduto</span>}
             </div>
 
-            <h1 className="font-serif text-3xl md:text-4xl text-bark-900 leading-tight mb-3">
+            <h1 className="font-serif text-2xl sm:text-3xl md:text-4xl text-bark-900 leading-tight mb-3">
               {product.title}
             </h1>
 
             {/* Price */}
             <div className="flex items-baseline gap-3 mb-6">
-              <span className="font-serif text-4xl text-bark-900 font-semibold">
+              <span className="font-serif text-3xl sm:text-4xl text-bark-900 font-semibold">
                 €{product.price.toLocaleString('it-IT')}
               </span>
               {product.originalPrice && (
@@ -219,7 +219,7 @@ export default function ProductDetail() {
 
         {/* Related products */}
         {relatedProducts.length > 0 && (
-          <div className="mt-20">
+          <div className="mt-10 sm:mt-20">
             <h2 className="font-serif text-3xl text-bark-900 mb-8">Prodotti simili</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               {relatedProducts.map(p => <ProductCard key={p.id} product={p} />)}
