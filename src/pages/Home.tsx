@@ -5,6 +5,7 @@ import EventCard from '../components/EventCard';
 import ProductCard from '../components/ProductCard';
 import { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
+import debalageHero from '../assets/debalage-hero.webp';
 
 // Maps product category strings → CATEGORIES id
 const CATEGORY_MAP: Record<string, string> = {
@@ -131,11 +132,11 @@ export default function Home() {
       <section className="relative min-h-[90vh] flex items-center overflow-hidden bg-bark-900">
         <div className="absolute inset-0">
           <img
-            src="https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1600&h=900&fit=crop"
-            alt="Vintage market"
-            className="w-full h-full object-cover opacity-30"
+            src={debalageHero}
+            alt="Mercatino vintage Debalage"
+            className="w-full h-full object-cover object-center opacity-40"
           />
-          <div className="absolute inset-0 bg-gradient-to-r from-bark-900/90 via-bark-900/60 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-bark-900/95 via-bark-900/65 to-bark-900/15" />
         </div>
 
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
