@@ -3,6 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 const url  = import.meta.env.VITE_SUPABASE_URL  as string;
 const key  = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
+// createClient richiede sempre URL e chiave non vuoti, anche quando il resto
+// dell'app usa i dati mock. Questi valori locali evitano il crash iniziale;
+// HAS_SUPABASE in AppContext continua a restare false senza variabili reali.
+const clientUrl = url || 'http://127.0.0.1:54321';
+const clientKey = key || 'offline-anon-key';
+
 if (!url || !key) {
   console.warn(
     '[supabase] VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY not set – ' +
@@ -14,12 +20,12 @@ if (!url || !key) {
 // It reads the stored session from localStorage and may trigger a token
 // refresh on initialisation. Do NOT use it for public read-queries that
 // should always work regardless of auth state.
-export const supabase = createClient(url ?? '', key ?? '');
+export const supabase = createClient(clientUrl, clientKey);
 
 // Public read-only client — never touches localStorage, never waits for
 // a session refresh.  Use this for loadCritical / loadDeferred so the
 // app loads even when the stored session is expired and the refresh hangs.
-export const supabasePublic = createClient(url ?? '', key ?? '', {
+export const supabasePublic = createClient(clientUrl, clientKey, {
   auth: {
     persistSession:     false,
     autoRefreshToken:   false,

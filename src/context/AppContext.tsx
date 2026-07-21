@@ -433,7 +433,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const [eventsRes, productsRes, profilesRes, settingsRes] = await Promise.all([
         supabasePublic.from('events').select('*').order('date', { ascending: true }),
         supabasePublic.from('products').select('*').order('created_at', { ascending: false }),
-        supabasePublic.from('profiles').select('*'),
+        supabasePublic.from('profiles_public').select('*'),
         supabasePublic.from('app_settings').select('key, value'),
       ]);
 
@@ -531,7 +531,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'LOGIN', payload: tempUser });
         }
 
-        const { data: profile } = await supabasePublic
+        const { data: profile } = await supabase
           .from('profiles').select('*').eq('id', su.id).single();
 
         if (profile) {
@@ -703,7 +703,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     dispatch({ type: 'LOGIN', payload: tempUser });
 
-    void supabasePublic.from('profiles').select('*').eq('id', data.user.id).single()
+    void supabase.from('profiles').select('*').eq('id', data.user.id).single()
       .then(({ data: profile }) => {
         if (profile) dispatch({ type: 'LOGIN', payload: rowToUser(profile as Record<string, unknown>) });
       });
