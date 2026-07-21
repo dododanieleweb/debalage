@@ -365,7 +365,7 @@ interface ContextValue {
   updateProduct: (product: Product) => void;
   deleteProduct: (productId: string) => void;
   // Events
-  addEvent:    (event: Event) => void;
+  addEvent:    (event: Event) => Promise<string | null>;
   updateEvent: (event: Event) => void;
   deleteEvent: (eventId: string) => void;
   // Cart prodotti
@@ -862,7 +862,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   // ── Events ────────────────────────────────────────────────────────────────
-  const addEvent = (event: Event) => {
+  const addEvent = async (event: Event): Promise<string | null> => {
+    if (!HAS_SUPABASE) {
+      dispatch({ type: 'ADD_EVENT', event });
+      return null;
+    }
+
+    const { error } = await supabase.from('events').insert({
+      id:                event.id,
+      seller_id:         event.sellerId,
+      title:             event.title,
+      description:       event.description,
+      type:              event.type,
+      status:            event.status,
+      date:              event.date,
+      end_date:          event.endDate ?? null,
+      time_start:        event.timeStart,
+      time_end:          event.timeEnd,
+      city:              event.city,
+      address:           event.address,
+      image:             event.image,
+      tags:              event.tags,
+      price:             event.price,
+      products_count:    event.productsCount,
+      max_attendees:     event.maxAttendees ?? null,
+      current_attendees: event.currentAttendees,
+      featured:          event.featured,
+      slot_max_capacity: event.slotMaxCapacity ?? null,
+    });
+
+    if (error) {
+      console.error('addEvent:', error);
+      return error.message;
+    }
+
     dispatch({ type: 'ADD_EVENT', event });
 
     // ── Dispatch fee cart voci SUBITO (sincrono/ottimistico) ────────────────
@@ -898,37 +931,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    if (!HAS_SUPABASE) return;
-    supabase.from('events').insert({
-      id:                event.id,
-      seller_id:         event.sellerId,
-      title:             event.title,
-      description:       event.description,
-      type:              event.type,
-      status:            event.status,
-      date:              event.date,
-      end_date:          event.endDate ?? null,
-      time_start:        event.timeStart,
-      time_end:          event.timeEnd,
-      city:              event.city,
-      address:           event.address,
-      image:             event.image,
-      tags:              event.tags,
-      price:             event.price,
-      products_count:    event.productsCount,
-      max_attendees:     event.maxAttendees ?? null,
-      current_attendees: event.currentAttendees,
-      featured:          event.featured,
-      slot_max_capacity: event.slotMaxCapacity ?? null,
-    }).then(({ error }) => {
-      if (error) {
-        console.error('addEvent:', error);
-        dispatch({ type: 'DELETE_EVENT', eventId: event.id });
-        // Rollback fee cart items aggiunti ottimisticamente
-        feeItemIds.forEach(id => dispatch({ type: 'REMOVE_FROM_FEE_CART', itemId: id }));
-        notifyErr(`Errore nel salvataggio dell'evento: ${error.message}`);
-      }
-    });
+    return null;
   };
 
   const updateEvent = (event: Event) => {

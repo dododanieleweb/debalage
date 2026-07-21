@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Plus, Star } from 'lucide-react';
+import { X, Plus, Star, Loader2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Event, EventType, EventStatus } from '../types';
 import { EVENT_TYPES } from '../data/mockData';
@@ -32,8 +32,9 @@ export default function EventForm({ initial, onClose }: Props) {
   const [price, setPrice] = useState(initial?.price?.toString() ?? '0');
   const [status, setStatus] = useState<EventStatus>(initial?.status ?? 'upcoming');
   const [featured, setFeatured] = useState(initial?.featured ?? false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const tags = tagsRaw.split(',').map(s => s.trim()).filter(Boolean);
 
@@ -70,7 +71,13 @@ export default function EventForm({ initial, onClose }: Props) {
       notify('Evento aggiornato!', 'success');
       onClose();
     } else {
-      addEvent(event);
+      setSubmitting(true);
+      const error = await addEvent(event);
+      setSubmitting(false);
+      if (error) {
+        notify(`Errore nel salvataggio dell'evento: ${error}`, 'error');
+        return;
+      }
       if (type === 'casa_privata') {
         initEventSlots(event.id, timeStart, timeEnd, parseInt(slotMaxCapacity) || 4);
       }
@@ -354,9 +361,9 @@ export default function EventForm({ initial, onClose }: Props) {
             <button type="button" onClick={onClose} className="btn-secondary flex-1 justify-center">
               Annulla
             </button>
-            <button type="submit" className="btn-primary flex-1 justify-center">
-              <Plus size={16} />
-              {isEdit ? 'Salva modifiche' : 'Crea evento'}
+            <button type="submit" disabled={submitting} className="btn-primary flex-1 justify-center disabled:opacity-60 disabled:cursor-not-allowed">
+              {submitting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+              {submitting ? 'Salvataggio…' : isEdit ? 'Salva modifiche' : 'Crea evento'}
             </button>
           </div>
         </form>

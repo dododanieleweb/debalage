@@ -73,20 +73,33 @@ export async function uploadImage(file: File, opts: UploadOptions): Promise<stri
   // mutex that can hang indefinitely on desktop Chrome/Firefox.
   const SUPABASE_URL_ENV = import.meta.env.VITE_SUPABASE_URL as string;
   let accessToken: string | undefined;
+  let tokenExpiresAt = 0;
   try {
     const projectRef = new URL(SUPABASE_URL_ENV).hostname.split('.')[0];
     const raw = localStorage.getItem(`sb-${projectRef}-auth-token`);
     if (raw) {
-      const parsed = JSON.parse(raw) as { access_token?: string };
+      const parsed = JSON.parse(raw) as { access_token?: string; expires_at?: number };
       accessToken = parsed.access_token;
+      tokenExpiresAt = parsed.expires_at ?? 0;
     }
   } catch {
     // localStorage not accessible — fall through to getSession()
   }
 
-  // Fallback: if localStorage read failed, try the supabase client (slower on PC)
-  if (!accessToken) {
-    const { data: sessionData } = await supabase.auth.getSession();
+  // Refresh tokens that are missing or close to expiry. Without this check an
+  // apparently logged-in user can receive a 401 from Storage after one hour.
+  if (!accessToken || (tokenExpiresAt > 0 && tokenExpiresAt <= Math.floor(Date.now() / 1000) + 60)) {
+    const sessionPromise = tokenExpiresAt > 0
+      ? supabase.auth.refreshSession()
+      : supabase.auth.getSession();
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Verifica sessione scaduta — effettua di nuovo il login')), 10_000),
+    );
+    const { data: sessionData, error: sessionError } = await Promise.race([
+      sessionPromise,
+      timeoutPromise,
+    ]);
+    if (sessionError) throw new Error(`Sessione non valida — ${sessionError.message}`);
     accessToken = sessionData?.session?.access_token;
   }
 
