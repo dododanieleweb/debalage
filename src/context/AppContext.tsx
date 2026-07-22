@@ -690,7 +690,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (user) { dispatch({ type: 'LOGIN', payload: user }); return null; }
       return 'Email o password non corretti.';
     }
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    let authResult: Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>;
+    try {
+      authResult = await Promise.race([
+        supabase.auth.signInWithPassword({ email, password }),
+        new Promise<never>((_, reject) =>
+          window.setTimeout(
+            () => reject(new Error('Il collegamento a Supabase non risponde. Aggiorna la pagina e riprova.')),
+            15_000,
+          ),
+        ),
+      ]);
+    } catch (error) {
+      return error instanceof Error ? error.message : 'Login non riuscito. Riprova.';
+    }
+    const { data, error } = authResult;
     if (error) return error.message;
     if (!data.user) return 'Login fallito. Riprova.';
 

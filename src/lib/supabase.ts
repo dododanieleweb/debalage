@@ -8,6 +8,10 @@ const key  = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 // HAS_SUPABASE in AppContext continua a restare false senza variabili reali.
 const clientUrl = url || 'http://127.0.0.1:54321';
 const clientKey = key || 'offline-anon-key';
+const projectRef = (() => {
+  try { return new URL(clientUrl).hostname.split('.')[0]; }
+  catch { return 'offline'; }
+})();
 
 if (!url || !key) {
   console.warn(
@@ -27,6 +31,9 @@ export const supabase = createClient(clientUrl, clientKey);
 // app loads even when the stored session is expired and the refresh hangs.
 export const supabasePublic = createClient(clientUrl, clientKey, {
   auth: {
+    // Deve essere diversa dalla chiave del client principale. Due GoTrueClient
+    // sulla stessa chiave possono contendersi il lock e bloccare il login.
+    storageKey:         `sb-${projectRef}-public-readonly`,
     persistSession:     false,
     autoRefreshToken:   false,
     detectSessionInUrl: false,
