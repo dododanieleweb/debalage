@@ -30,6 +30,12 @@
 # Same-origin proxy for Supabase Auth. Some browser/network configurations
 # block the cross-origin auth request even when CORS is valid.
 [[redirects]]
+  from   = "/api/supabase/auth/v1/token"
+  to     = "/.netlify/functions/supabase-login"
+  status = 200
+  force  = true
+
+[[redirects]]
   from   = "/api/supabase/*"
   to     = "https://jrsbefallmiakxkdqxwe.supabase.co/:splat"
   status = 200
