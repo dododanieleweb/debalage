@@ -715,7 +715,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     let authData: DirectAuthResponse;
     try {
-      const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      const response = await fetch('/api/supabase/auth/v1/token?grant_type=password', {
         method: 'POST',
         signal: controller.signal,
         headers: {
