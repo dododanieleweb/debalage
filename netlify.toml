@@ -5,6 +5,9 @@
 [build.environment]
   NODE_VERSION = "20"
 
+[functions]
+  directory = "netlify/functions"
+
 # All routes: never cache (the redirect always serves index.html)
 # Browsers and Netlify CDN will always fetch fresh content
 [[headers]]

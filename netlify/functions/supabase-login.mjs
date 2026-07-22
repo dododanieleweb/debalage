@@ -1,18 +1,20 @@
-export default async (request) => {
-  if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ message: 'Method not allowed' }), {
-      status: 405,
+export const handler = async (event) => {
+  if (event.httpMethod !== 'POST') {
+    return {
+      statusCode: 405,
       headers: { 'content-type': 'application/json' },
-    });
+      body: JSON.stringify({ message: 'Method not allowed' }),
+    };
   }
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !anonKey) {
-    return new Response(JSON.stringify({ message: 'Supabase configuration missing' }), {
-      status: 500,
+    return {
+      statusCode: 500,
       headers: { 'content-type': 'application/json' },
-    });
+      body: JSON.stringify({ message: 'Supabase configuration missing' }),
+    };
   }
 
   try {
@@ -23,17 +25,19 @@ export default async (request) => {
         authorization: `Bearer ${anonKey}`,
         'content-type': 'application/json',
       },
-      body: await request.text(),
+      body: event.body ?? '{}',
     });
 
-    return new Response(await upstream.text(), {
-      status: upstream.status,
+    return {
+      statusCode: upstream.status,
       headers: { 'content-type': 'application/json' },
-    });
+      body: await upstream.text(),
+    };
   } catch {
-    return new Response(JSON.stringify({ message: 'Authentication service unavailable' }), {
-      status: 502,
+    return {
+      statusCode: 502,
       headers: { 'content-type': 'application/json' },
-    });
+      body: JSON.stringify({ message: 'Authentication service unavailable' }),
+    };
   }
 };
