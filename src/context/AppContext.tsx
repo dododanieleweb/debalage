@@ -635,11 +635,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (body)   headers['Content-Type'] = 'application/json';
     if (prefer) headers['Prefer']       = prefer;
 
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 20_000);
+
     try {
       const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
       });
       // 401 = sessione scaduta/revocata → logout automatico
       if (res.status === 401) {
@@ -654,7 +658,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const data = method === 'GET' ? await res.json() : undefined;
       return { ok: true, data };
     } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        return { ok: false, error: 'Tempo scaduto durante la comunicazione con Supabase. Riprova.' };
+      }
       return { ok: false, error: String(e) };
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   };
 
@@ -868,7 +877,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return null;
     }
 
-    const { error } = await supabase.from('events').insert({
+    // La chiamata REST diretta evita il mutex della sessione di supabase-js,
+    // che su alcuni browser può lasciare il form in attesa indefinitamente.
+    const { ok, error } = await directRequest('POST', 'events', {
       id:                event.id,
       seller_id:         event.sellerId,
       title:             event.title,
@@ -889,11 +900,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       current_attendees: event.currentAttendees,
       featured:          event.featured,
       slot_max_capacity: event.slotMaxCapacity ?? null,
-    });
+    }, 'return=minimal');
 
-    if (error) {
+    if (!ok) {
       console.error('addEvent:', error);
-      return error.message;
+      return error ?? 'Errore sconosciuto durante il salvataggio';
     }
 
     dispatch({ type: 'ADD_EVENT', event });
