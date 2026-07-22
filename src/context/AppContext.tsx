@@ -690,44 +690,86 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (user) { dispatch({ type: 'LOGIN', payload: user }); return null; }
       return 'Email o password non corretti.';
     }
-    let authResult: Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>;
-    try {
-      authResult = await Promise.race([
-        supabase.auth.signInWithPassword({ email, password }),
-        new Promise<never>((_, reject) =>
-          window.setTimeout(
-            () => reject(new Error('Il collegamento a Supabase non risponde. Aggiorna la pagina e riprova.')),
-            15_000,
-          ),
-        ),
-      ]);
-    } catch (error) {
-      return error instanceof Error ? error.message : 'Login non riuscito. Riprova.';
-    }
-    const { data, error } = authResult;
-    if (error) return error.message;
-    if (!data.user) return 'Login fallito. Riprova.';
+    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+    const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
 
-    const meta = (data.user.user_metadata ?? {}) as Record<string, unknown>;
+    type DirectAuthResponse = {
+      access_token: string;
+      refresh_token: string;
+      expires_in?: number;
+      expires_at?: number;
+      token_type?: string;
+      user: {
+        id: string;
+        email?: string;
+        created_at?: string;
+        user_metadata?: Record<string, unknown>;
+      };
+      error?: string;
+      error_description?: string;
+      msg?: string;
+      message?: string;
+    };
+
+    let authData: DirectAuthResponse;
+    try {
+      const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'apikey': ANON_KEY,
+          'Authorization': `Bearer ${ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+      authData = await response.json() as DirectAuthResponse;
+      if (!response.ok) {
+        return authData.msg ?? authData.message ?? authData.error_description
+          ?? authData.error ?? 'Email o password non corretti.';
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return 'Il collegamento a Supabase non risponde. Aggiorna la pagina e riprova.';
+      }
+      return error instanceof Error ? error.message : 'Login non riuscito. Riprova.';
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+
+    if (!authData.access_token || !authData.user) return 'Login fallito. Riprova.';
+
+    // Persistenza compatibile con supabase-js, senza passare dal suo mutex.
+    authData.expires_at ??= Math.floor(Date.now() / 1000) + (authData.expires_in ?? 3600);
+    try {
+      const projectRef = new URL(SUPABASE_URL).hostname.split('.')[0];
+      localStorage.setItem(`sb-${projectRef}-auth-token`, JSON.stringify(authData));
+    } catch { /* il login corrente continua a funzionare tramite il ref */ }
+    sessionTokenRef.current = authData.access_token;
+
+    const meta = authData.user.user_metadata ?? {};
     const tempUser: User = {
-      id:          data.user.id,
+      id:          authData.user.id,
       name:        (meta.name as string) || email.split('@')[0],
-      email:       data.user.email ?? email,
+      email:       authData.user.email ?? email,
       role:        (meta.role as User['role']) ?? 'buyer',
       city:        (meta.city as string) ?? '',
       avatar:      `https://ui-avatars.com/api/?name=${encodeURIComponent((meta.name as string) || email)}&background=8B6A3E&color=FAF7F2&size=200`,
       bio:         '',
       rating:      0,
       reviewCount: 0,
-      joinedAt:    data.user.created_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+      joinedAt:    authData.user.created_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
       specialties: [],
       verified:    false,
       salesCount:  0,
     };
     dispatch({ type: 'LOGIN', payload: tempUser });
 
-    void supabase.from('profiles').select('*').eq('id', data.user.id).single()
-      .then(({ data: profile }) => {
+    void directRequest('GET', `profiles?id=eq.${encodeURIComponent(authData.user.id)}&limit=1`)
+      .then(({ ok, data: profiles }) => {
+        const profile = ok && Array.isArray(profiles) ? profiles[0] : null;
         if (profile) dispatch({ type: 'LOGIN', payload: rowToUser(profile as Record<string, unknown>) });
       });
 
