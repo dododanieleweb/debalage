@@ -361,7 +361,7 @@ interface ContextValue {
   openAuth:  (mode: 'login' | 'register') => void;
   closeAuth: () => void;
   // Products
-  addProduct:    (product: Product) => void;
+  addProduct:    (product: Product) => Promise<string | null>;
   updateProduct: (product: Product) => void;
   deleteProduct: (productId: string) => void;
   // Events
@@ -830,10 +830,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const closeAuth = () => dispatch({ type: 'CLOSE_AUTH' });
 
   // ── Products ──────────────────────────────────────────────────────────────
-  const addProduct = (product: Product) => {
-    dispatch({ type: 'ADD_PRODUCT', product });
-    if (!HAS_SUPABASE) return;
-    supabase.from('products').insert({
+  const addProduct = async (product: Product): Promise<string | null> => {
+    if (!HAS_SUPABASE) {
+      dispatch({ type: 'ADD_PRODUCT', product });
+      return null;
+    }
+
+    const { ok, error } = await directRequest('POST', 'products', {
       id:             product.id,
       seller_id:      product.sellerId,
       event_id:       product.eventId ?? null,
@@ -853,13 +856,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       status:         product.status,
       featured:       product.featured,
       saves:          0,
-    }).then(({ error }) => {
-      if (error) {
-        console.error('addProduct:', error);
-        dispatch({ type: 'DELETE_PRODUCT', productId: product.id });
-        notifyErr(`Errore nel salvataggio del prodotto: ${error.message}`);
-      }
-    });
+    }, 'return=minimal');
+
+    if (!ok) {
+      console.error('addProduct:', error);
+      return error ?? 'Errore sconosciuto durante il salvataggio';
+    }
+
+    dispatch({ type: 'ADD_PRODUCT', product });
+    return null;
   };
 
   const updateProduct = (product: Product) => {

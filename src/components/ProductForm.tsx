@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Plus, Star } from 'lucide-react';
+import { X, Plus, Star, Loader2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Product, ProductCondition, ProductStatus } from '../types';
 import { CONDITIONS } from '../data/mockData';
@@ -37,8 +37,9 @@ export default function ProductForm({ initial, onClose }: Props) {
   const [originalPrice, setOriginalPrice] = useState(initial?.originalPrice?.toString() ?? '');
   const [status, setStatus] = useState<ProductStatus>(initial?.status ?? 'available');
   const [featured, setFeatured] = useState(initial?.featured ?? false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const tags = tagsRaw.split(',').map(s => s.trim()).filter(Boolean);
 
@@ -74,11 +75,18 @@ export default function ProductForm({ initial, onClose }: Props) {
     if (isEdit) {
       updateProduct(product);
       notify('Prodotto aggiornato!', 'success');
+      onClose();
     } else {
-      addProduct(product);
+      setSubmitting(true);
+      const error = await addProduct(product);
+      setSubmitting(false);
+      if (error) {
+        notify(`Errore nel salvataggio del prodotto: ${error}`, 'error');
+        return;
+      }
       notify('Prodotto aggiunto!', 'success');
+      onClose();
     }
-    onClose();
   };
 
   return (
@@ -331,9 +339,9 @@ export default function ProductForm({ initial, onClose }: Props) {
             <button type="button" onClick={onClose} className="btn-secondary flex-1 justify-center">
               Annulla
             </button>
-            <button type="submit" className="btn-primary flex-1 justify-center">
-              <Plus size={16} />
-              {isEdit ? 'Salva modifiche' : 'Aggiungi prodotto'}
+            <button type="submit" disabled={submitting} className="btn-primary flex-1 justify-center disabled:opacity-60 disabled:cursor-not-allowed">
+              {submitting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+              {submitting ? 'Salvataggio…' : isEdit ? 'Salva modifiche' : 'Aggiungi prodotto'}
             </button>
           </div>
         </form>
