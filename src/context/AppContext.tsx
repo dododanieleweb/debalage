@@ -726,7 +726,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     let authData: DirectAuthResponse;
     try {
-      const response = await fetch('/api/supabase/auth/v1/token?grant_type=password', {
+      const response = await fetch('/.netlify/functions/supabase-login', {
         method: 'POST',
         signal: controller.signal,
         headers: {
@@ -736,7 +736,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         },
         body: JSON.stringify({ email, password }),
       });
-      authData = await response.json() as DirectAuthResponse;
+      const responseText = await response.text();
+      try {
+        authData = JSON.parse(responseText) as DirectAuthResponse;
+      } catch {
+        return response.ok
+          ? 'Risposta di autenticazione non valida. Riprova.'
+          : `Servizio di autenticazione non disponibile (HTTP ${response.status}).`;
+      }
       if (!response.ok) {
         return authData.msg ?? authData.message ?? authData.error_description
           ?? authData.error ?? 'Email o password non corretti.';
