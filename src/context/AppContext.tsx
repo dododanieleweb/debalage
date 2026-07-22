@@ -429,6 +429,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }, 8000);
 
+    const authLoadingTimeout = setTimeout(() => {
+      if (stateRef.current.authLoading) {
+        console.warn('Supabase auth timeout — forcing authLoading:false');
+        dispatch({ type: 'SET_AUTH_LOADING', value: false });
+      }
+    }, 8000);
+
     const loadCritical = async () => {
       const [eventsRes, productsRes, profilesRes, settingsRes] = await Promise.all([
         supabasePublic.from('events').select('*').order('date', { ascending: true }),
@@ -531,8 +538,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'LOGIN', payload: tempUser });
         }
 
-        const { data: profile } = await supabase
-          .from('profiles').select('*').eq('id', su.id).single();
+        const { ok: profileOk, data: profileRows } = await directRequest(
+          'GET',
+          `profiles?id=eq.${encodeURIComponent(su.id)}&limit=1`,
+        );
+        const profile = profileOk && Array.isArray(profileRows) ? profileRows[0] : null;
 
         if (profile) {
           dispatch({ type: 'LOGIN', payload: rowToUser(profile as Record<string, unknown>) });
@@ -595,6 +605,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       subscription.unsubscribe();
       clearTimeout(loadingTimeout);
+      clearTimeout(authLoadingTimeout);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -748,6 +759,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(`sb-${projectRef}-auth-token`, JSON.stringify(authData));
     } catch { /* il login corrente continua a funzionare tramite il ref */ }
     sessionTokenRef.current = authData.access_token;
+    dispatch({ type: 'SET_AUTH_LOADING', value: true });
 
     const meta = authData.user.user_metadata ?? {};
     const tempUser: User = {
@@ -767,11 +779,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     dispatch({ type: 'LOGIN', payload: tempUser });
 
-    void directRequest('GET', `profiles?id=eq.${encodeURIComponent(authData.user.id)}&limit=1`)
-      .then(({ ok, data: profiles }) => {
-        const profile = ok && Array.isArray(profiles) ? profiles[0] : null;
-        if (profile) dispatch({ type: 'LOGIN', payload: rowToUser(profile as Record<string, unknown>) });
-      });
+    const { ok: profileOk, data: profiles } = await directRequest(
+      'GET',
+      `profiles?id=eq.${encodeURIComponent(authData.user.id)}&limit=1`,
+    );
+    const profile = profileOk && Array.isArray(profiles) ? profiles[0] : null;
+    if (profile) {
+      dispatch({ type: 'LOGIN', payload: rowToUser(profile as Record<string, unknown>) });
+    }
+    dispatch({ type: 'SET_AUTH_LOADING', value: false });
 
     return null;
   };
