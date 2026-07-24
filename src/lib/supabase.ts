@@ -1,7 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 
-const url  = import.meta.env.VITE_SUPABASE_URL  as string;
-const key  = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+// La publishable key è progettata per essere inclusa nel client. La sicurezza
+// dei dati è garantita dalle policy RLS, non dalla segretezza di questa chiave.
+// Tenerla qui evita deploy costruiti con variabili Netlify obsolete o mancanti.
+export const SUPABASE_URL = 'https://jrsbefallmiakxkdqxwe.supabase.co';
+export const SUPABASE_ANON_KEY = 'sb_publishable_q9YWFCnG19t3zYPnJJzJGw_Xm678b0o';
+
+const url = SUPABASE_URL;
+const key = SUPABASE_ANON_KEY;
 
 // createClient richiede sempre URL e chiave non vuoti, anche quando il resto
 // dell'app usa i dati mock. Questi valori locali evitano il crash iniziale;

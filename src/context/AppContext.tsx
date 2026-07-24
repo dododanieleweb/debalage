@@ -4,12 +4,10 @@ import {
 } from 'react';
 import { User, Product, CartItem, TimeSlot, Order, Event, PendingFee, FeeCartItem } from '../types';
 import { USERS, PRODUCTS, EVENTS, INITIAL_SLOTS, generateSlots } from '../data/mockData';
-import { supabase, supabasePublic } from '../lib/supabase';
+import { supabase, supabasePublic, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/supabase';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
-const HAS_SUPABASE =
-  Boolean(import.meta.env.VITE_SUPABASE_URL) &&
-  Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY);
+const HAS_SUPABASE = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 function rowToUser(r: Record<string, unknown>): User {
   return {
@@ -615,7 +613,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (sessionTokenRef.current) return sessionTokenRef.current;
     // 2. localStorage — fallback per ricariche di pagina successive
     try {
-      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
       const projectRef  = new URL(SUPABASE_URL).hostname.split('.')[0];
       const raw = localStorage.getItem(`sb-${projectRef}-auth-token`);
       if (raw) {
@@ -633,8 +630,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     body?: Record<string, unknown>,
     prefer?: string,
   ): Promise<{ ok: boolean; data?: unknown; error?: string }> => {
-    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-    const ANON_KEY     = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+    const ANON_KEY = SUPABASE_ANON_KEY;
     const token = getAccessToken();
     if (!token) return { ok: false, error: 'no_token' };
 
@@ -701,8 +697,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (user) { dispatch({ type: 'LOGIN', payload: user }); return null; }
       return 'Email o password non corretti.';
     }
-    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-    const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+    const ANON_KEY = SUPABASE_ANON_KEY;
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
 
@@ -726,7 +721,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     let authData: DirectAuthResponse;
     try {
-      const response = await fetch('/.netlify/functions/supabase-login', {
+      const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
         method: 'POST',
         signal: controller.signal,
         headers: {

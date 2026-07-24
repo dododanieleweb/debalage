@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 
 const BUCKET = 'debalage-images';
 
@@ -71,7 +71,7 @@ export async function uploadImage(file: File, opts: UploadOptions): Promise<stri
 
   // Read token directly from localStorage to avoid the supabase-js internal
   // mutex that can hang indefinitely on desktop Chrome/Firefox.
-  const SUPABASE_URL_ENV = import.meta.env.VITE_SUPABASE_URL as string;
+  const SUPABASE_URL_ENV = SUPABASE_URL;
   let accessToken: string | undefined;
   let tokenExpiresAt = 0;
   try {
@@ -109,8 +109,7 @@ export async function uploadImage(file: File, opts: UploadOptions): Promise<stri
 
   // Use a direct fetch instead of the supabase-js storage client
   // to avoid the internal session-refresh hang that supabase-js can trigger
-  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-  const ANON_KEY    = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+  const ANON_KEY = SUPABASE_ANON_KEY;
   const uploadUrl   = `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`;
 
   const controller  = new AbortController();
