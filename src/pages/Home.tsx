@@ -6,7 +6,7 @@ import ProductCard from '../components/ProductCard';
 import { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import debalageHero from '../assets/debalage-hero.webp';
-import debalageFullLogo from '../assets/debalage-logo-full-clean.webp';
+import debalageLogo from '../assets/debalage-logo.png';
 
 // Maps product category strings → CATEGORIES id
 const CATEGORY_MAP: Record<string, string> = {
@@ -147,11 +147,26 @@ export default function Home() {
               Il marketplace del vintage italiano
             </div>
 
-            <img
-              src={debalageFullLogo}
-              alt="Debalage"
-              className="w-[200px] md:w-[300px] h-auto mx-auto mb-6 rounded-xl shadow-lg"
-            />
+            <div className="flex justify-center mb-7" aria-label="Debalage">
+              <div className="inline-flex items-center gap-3 md:gap-4">
+                <img
+                  src={debalageLogo}
+                  alt=""
+                  aria-hidden="true"
+                  className="w-16 h-16 md:w-20 md:h-20 object-contain drop-shadow-lg"
+                />
+                <div>
+                  <div className="font-serif text-4xl md:text-5xl leading-none text-cream-50 tracking-tight drop-shadow-md">
+                    Debalage
+                  </div>
+                  <div className="flex items-center gap-2 mt-2" aria-hidden="true">
+                    <span className="h-px flex-1 bg-vintage-400/70" />
+                    <span className="w-1.5 h-1.5 rotate-45 bg-vintage-400" />
+                    <span className="h-px flex-1 bg-vintage-400/70" />
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <h1 className="font-serif text-5xl md:text-6xl lg:text-7xl text-cream-50 leading-[1.05] mb-6">
               Scopri Tesori<br />
