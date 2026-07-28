@@ -147,7 +147,7 @@ export default function Home() {
               Il marketplace del vintage italiano
             </div>
 
-            <div className="flex justify-center mb-7" aria-label="Debalage">
+            <div className="flex justify-start mb-7" aria-label="Debalage">
               <div className="inline-flex items-center gap-3 md:gap-4">
                 <img
                   src={debalageLogo}
