@@ -6,6 +6,7 @@ import ProductCard from '../components/ProductCard';
 import { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import debalageHero from '../assets/debalage-hero.webp';
+import debalageFullLogo from '../assets/debalage-logo-full-clean.webp';
 
 // Maps product category strings → CATEGORIES id
 const CATEGORY_MAP: Record<string, string> = {
@@ -145,6 +146,12 @@ export default function Home() {
               <Sparkles size={12} />
               Il marketplace del vintage italiano
             </div>
+
+            <img
+              src={debalageFullLogo}
+              alt="Debalage"
+              className="w-[200px] md:w-[300px] h-auto mx-auto mb-6 rounded-xl shadow-lg"
+            />
 
             <h1 className="font-serif text-5xl md:text-6xl lg:text-7xl text-cream-50 leading-[1.05] mb-6">
               Scopri Tesori<br />
