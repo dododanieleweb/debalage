@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { ShoppingBag, Heart, Menu, X, Search, User, LogOut, LayoutDashboard, ChevronDown, Package, Shield, Banknote } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import debalageLogo from '../assets/debalage-logo.png';
 
 export default function Navbar() {
   const { state, logout, openAuth, cartCount, feeCartCount } = useApp();
@@ -53,6 +54,12 @@ export default function Navbar() {
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <Link to="/" className="flex items-center gap-2 group">
+              <img
+                src={debalageLogo}
+                alt=""
+                aria-hidden="true"
+                className="h-11 w-11 object-contain transition-transform duration-300 group-hover:scale-105"
+              />
               <span className="font-serif text-xl font-semibold text-bark-900 group-hover:text-vintage-600 transition-colors">
                 Debalage
               </span>

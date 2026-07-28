@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Instagram, Facebook, Mail, MapPin, Phone } from 'lucide-react';
+import debalageLogo from '../assets/debalage-logo.png';
 
 export default function Footer() {
   return (
@@ -8,7 +9,13 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10">
           {/* Brand */}
           <div className="lg:col-span-1">
-            <Link to="/" className="inline-block mb-4">
+            <Link to="/" className="inline-flex items-center gap-3 mb-4 group">
+              <img
+                src={debalageLogo}
+                alt=""
+                aria-hidden="true"
+                className="h-14 w-14 object-contain"
+              />
               <span className="font-serif text-2xl font-semibold text-cream-50">Debalage</span>
             </Link>
             <p className="text-sm text-cream-400 leading-relaxed mb-6">
